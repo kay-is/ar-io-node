@@ -1,0 +1,22 @@
+# fly.toml app configuration file generated for ar-io-observer on 2023-10-24T20:26:17Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "ar-io-observer"
+primary_region = "ams"
+
+[build]
+  image = "ghcr.io/ar-io/ar-io-observer:ae0005422005cf51b8222cecb6704d8cd172e8ca"
+
+[env]
+  PORT = "5000"
+  RUN_OBSERVER = "true"
+
+[http_service]
+  internal_port = 5000
+  force_https = false
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
