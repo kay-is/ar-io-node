@@ -1,0 +1,28 @@
+# fly.toml app configuration file generated for ar-io-node on 2023-09-14T16:15:31Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "ar-io-node"
+primary_region = "ams"
+
+[env]
+  GRAPHQL_HOST="arweave.net"
+  GRAPHQL_PORT="443"
+  START_HEIGHT="0"
+  ARNS_ROOT_HOST="arweave.fllstck.dev"
+  START_WRITERS="true"
+  SANDBOX_PROTOCOL="https"
+  LOG_LEVEL="notice"
+
+[mounts]
+  source="app_data"
+  destination="/app/data"
+
+[http_service]
+  internal_port = 4000
+  force_https = false
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
