@@ -3,6 +3,7 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
+# This service will be available via ar-io-observer.flycast
 app = "ar-io-observer"
 primary_region = "ams"
 
@@ -15,7 +16,7 @@ primary_region = "ams"
 
 [http_service]
   internal_port = 5000
-  force_https = false
+  force_https = false # Only accessed via proxy (private IPv6), doesn't need SSL
   auto_stop_machines = true
   auto_start_machines = true
   min_machines_running = 1
