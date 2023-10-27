@@ -1,4 +1,4 @@
-name: Deploy Envoy
+name: Deploy Observer
 on:
   push:
     branches:
