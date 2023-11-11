@@ -8,13 +8,13 @@ primary_region = "ams"
 
 [env]
   TVAL_AR_IO_HOST = "ar-io-node.flycast"
-  TVAL_AR_IO_PORT = "80"
+  TVAL_AR_IO_PORT = "80" # Fly.io maps http_service to 80 by default
   TVAL_GATEWAY_HOST = "arweave.dev"
   TVAL_GRAPHQL_HOST = "ar-io-node.flycast"
-  TVAL_GRAPHQL_PORT = "80"
+  TVAL_GRAPHQL_PORT = "80 "# Fly.io maps http_service to 80 by default
   TVAL_ARNS_ROOT_HOST= "arweave.fllstck.dev"
   TVAL_OBSERVER_HOST= "ar-io-observer.flycast"
-  TVAL_OBSERVER_PORT = "80"
+  TVAL_OBSERVER_PORT = "80" # Fly.io maps http_service to 80 by default
 
 [http_service]
   internal_port = 3000
