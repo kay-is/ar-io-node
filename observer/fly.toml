@@ -8,13 +8,15 @@ app = "ar-io-observer"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-observer:14802babee090d674249960df890c54c9406076b"
+  image = "ghcr.io/ar-io/ar-io-observer:af96b81d221665b3150e16556ee98fb10c57e4b5"
 
 [env]
   PORT = "5000"
+  RUN_OBSERVER = "true"
+  SUBMIT_CONTRACT_INTERACTIONS = "true"
+  NUM_ARNS_NAMES_TO_OBSERVE_PER_GROUP = "5"
 # OBSERVER_WALLET=***
 # CONTRACT_ID=default
-  RUN_OBSERVER = "true"
 
 [http_service]
   internal_port = 5000
