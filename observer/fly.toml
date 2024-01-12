@@ -8,7 +8,7 @@ app = "ar-io-observer"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-observer:af96b81d221665b3150e16556ee98fb10c57e4b5"
+  image = "ghcr.io/ar-io/ar-io-observer:f7deecbf31a5a331a22fc6336e2f831ad518ebf7"
 
 [env]
   PORT = "5000"
