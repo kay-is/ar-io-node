@@ -7,7 +7,7 @@ app = "ar-io-node"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-core:bc24b0856578313918afa8f515ebdf7ff613a96f"
+  image = "ghcr.io/ar-io/ar-io-core:46cc3de10448939122caece9dd7e19600c0c5566"
 
 [env]
   ARNS_ROOT_HOST="arweave.fllstck.dev"
