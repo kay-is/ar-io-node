@@ -6,6 +6,9 @@
 app = "ar-io-node-proxy"
 primary_region = "ams"
 
+[build]
+  image = "ghcr.io/ar-io/ar-io-envoy:01952702b78be1e464b9d192e77b38a119bdc4ee"
+
 [env]
   TVAL_AR_IO_HOST = "ar-io-node.flycast"
   TVAL_AR_IO_PORT = "80" # Fly.io maps http_service to 80 by default
