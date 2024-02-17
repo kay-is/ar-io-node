@@ -7,7 +7,7 @@ app = "ar-io-node-proxy"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-envoy:01952702b78be1e464b9d192e77b38a119bdc4ee"
+  image = "ghcr.io/ar-io/ar-io-envoy:c6c48f53a8f60ccfd007fdd3dbc2ed481340e25d"
 
 [env]
   TVAL_AR_IO_HOST = "ar-io-node.flycast"
