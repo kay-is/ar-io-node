@@ -10,6 +10,7 @@ primary_region = "ams"
   image = "ghcr.io/ar-io/ar-io-envoy:c6c48f53a8f60ccfd007fdd3dbc2ed481340e25d"
 
 [env]
+  LOG_LEVEL = "info"
   TVAL_AR_IO_HOST = "ar-io-node.flycast"
   TVAL_AR_IO_PORT = "80" # Fly.io maps http_service to 80 by default
   TVAL_GATEWAY_HOST = "arweave.dev"

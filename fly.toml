@@ -7,7 +7,7 @@ app = "ar-io-node"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-core:aad32f56066234a517b3724ac6832d5a21640dd7"
+  image = "ghcr.io/ar-io/ar-io-core:47d22b4b38a51ff7f28ff4e9f529f398022478c3"
   
 [env]
   ARNS_ROOT_HOST="arweave.fllstck.dev"
@@ -17,6 +17,8 @@ primary_region = "ams"
   ENABLE_FS_HEADER_CACHE_CLEANUP="true"
   LOG_LEVEL="notice"
   ANS104_UNBUNDLE_WORKERS="0"
+  MIN_RELEASE_NUMBER="0"
+  AR_IO_NODE_RELEASE="8"
 #  REDIS_CACHE_URL=*** // Using Upstash Redis via Fly.io
 #  ADMIN_API_KEY=***
 #  AR_IO_WALLET=***
