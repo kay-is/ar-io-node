@@ -8,9 +8,10 @@ app = "ar-io-observer"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-observer:a4836f1d12839e78aa2438188ed058f950969274"
+  image = "ghcr.io/ar-io/ar-io-observer:953883ef8cfbce33dd9fa85b5e58c5e67ed4bfa3"
 
 [env]
+  LOG_LEVEL = "info"
   PORT = "5000"
   RUN_OBSERVER = "true"
   SUBMIT_CONTRACT_INTERACTIONS = "true"
