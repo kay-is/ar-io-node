@@ -35,3 +35,15 @@ primary_region = "ams"
   auto_start_machines = true
   min_machines_running = 1
   processes = ["app"]
+
+[checks]
+  [checks.ario_healthcheck]
+    grace_period = "30s"
+    interval = "15s"
+    method = "get"
+    path = "/ar-io/healthcheck"
+    port = 4000
+    timeout = "10s"
+    type = "http"
+    [checks.ario_healthcheck.headers]
+      Content-Type = "application/json"
