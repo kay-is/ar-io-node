@@ -8,21 +8,21 @@ app = "ar-io-observer"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-observer:624b6090acd1060c89f7bb1995a86df310388b72"
+  image = "ghcr.io/ar-io/ar-io-observer:60809d95aa162117867ab300634ceec2d2a49337"
 
 [env]
   LOG_LEVEL = "info"
-  PORT = "5000"
+  PORT = "5050"
   RUN_OBSERVER = "true"
   SUBMIT_CONTRACT_INTERACTIONS = "true"
   NUM_ARNS_NAMES_TO_OBSERVE_PER_GROUP = "5"
-  AR_IO_NODE_RELEASE="11"
+  AR_IO_NODE_RELEASE="14"
   OBSERVER_WALLET="lk2W8J5mj9JDpl22p1WMC05gD7EqWJZbbAgOAswC9xk"
 # OBSERVER_JWK=***
 # CONTRACT_ID=default
 
 [http_service]
-  internal_port = 5000
+  internal_port = 5050
   force_https = false # Only accessed via proxy (private IPv6), doesn't need SSL
   auto_stop_machines = true
   auto_start_machines = true
