@@ -21,6 +21,7 @@ primary_region = "ams"
   AR_IO_NODE_RELEASE="8"
   TRUSTED_GATEWAY_URL="https://arweave.net"
   ENABLE_MEMPOOL_WATCHER="false"
+  CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD=86400 # older than a day
 #  REDIS_CACHE_URL=*** // Using Upstash Redis via Fly.io
 #  ADMIN_API_KEY=***
 #  AR_IO_WALLET=***
