@@ -7,7 +7,7 @@ app = "ar-io-node-proxy"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-envoy:bd2a6981cf7a12c5643742ef51b4addab40e5aa1"
+  image = "ghcr.io/ar-io/ar-io-envoy:d26d4958a2624f85c9f430e6a760523102a9e891"
 
 [env]
   LOG_LEVEL = "info"
@@ -23,7 +23,7 @@ primary_region = "ams"
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0
   processes = ["app"]

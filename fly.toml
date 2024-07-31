@@ -7,7 +7,7 @@ app = "ar-io-node"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-core:ccc40692ee9785aaa48e070a2a4645ee8d915654"
+  image = "ghcr.io/ar-io/ar-io-core:c9bf76284c39bdfc10381f6becb892442e183098"
   
 [env]
   ARNS_ROOT_HOST="arweave.fllstck.dev"
@@ -21,7 +21,7 @@ primary_region = "ams"
   AR_IO_NODE_RELEASE="8"
   TRUSTED_GATEWAY_URL="https://arweave.net"
   ENABLE_MEMPOOL_WATCHER="false"
-  CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD=86400 # older than a day
+  CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD="86400" # older than a day
 #  REDIS_CACHE_URL=*** // Using Upstash Redis via Fly.io
 #  ADMIN_API_KEY=***
 #  AR_IO_WALLET=***
@@ -34,7 +34,7 @@ primary_region = "ams"
 [http_service]
   internal_port = 4000
   force_https = false
-  auto_stop_machines = true
+  auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 1
   processes = ["app"]
