@@ -8,7 +8,7 @@ app = "ar-io-observer"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-observer:b2c64c3e6838511966ca4b70c05294f35aa91114"
+  image = "ghcr.io/ar-io/ar-io-observer:4761f3b7ce06538e2be431621a82e10f0cd37787"
 
 [env]
   LOG_LEVEL = "info"
@@ -16,7 +16,8 @@ primary_region = "ams"
   RUN_OBSERVER = "true"
   SUBMIT_CONTRACT_INTERACTIONS = "true"
   NUM_ARNS_NAMES_TO_OBSERVE_PER_GROUP = "5"
-  AR_IO_NODE_RELEASE="14"
+  MIN_RELEASE_NUMBER="0"
+  AR_IO_NODE_RELEASE="17"
   OBSERVER_WALLET="lk2W8J5mj9JDpl22p1WMC05gD7EqWJZbbAgOAswC9xk"
 # OBSERVER_JWK=***
 # CONTRACT_ID=default
