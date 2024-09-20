@@ -51,5 +51,6 @@ primary_region = "ams"
     port = 4000
     timeout = "10s"
     type = "http"
+    restart_limit = 4
     [checks.ario_healthcheck.headers]
       Content-Type = "application/json"
