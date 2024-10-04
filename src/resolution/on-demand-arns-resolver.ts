@@ -19,45 +19,90 @@ import winston from 'winston';
 
 import { isValidDataId } from '../lib/validation.js';
 import { NameResolution, NameResolver } from '../types.js';
-import { ANT, AoIORead, AOProcess, IO } from '@ar.io/sdk';
+import { ANT, AoClient, AoIORead, AOProcess, IO } from '@ar.io/sdk';
 import * as config from '../config.js';
 import { connect } from '@permaweb/aoconnect';
+import CircuitBreaker from 'opossum';
+import * as metrics from '../metrics.js';
 
 export class OnDemandArNSResolver implements NameResolver {
   private log: winston.Logger;
   private networkProcess: AoIORead;
+  private ao: AoClient;
+  private aoCircuitBreaker: CircuitBreaker<
+    Parameters<AoIORead['getArNSRecord']>,
+    Awaited<ReturnType<AoIORead['getArNSRecord']>>
+  >;
 
   constructor({
     log,
-    networkProcess = IO.init({
-      processId: config.IO_PROCESS_ID,
+    ao = connect({
+      MU_URL: config.AO_MU_URL,
+      CU_URL: config.AO_CU_URL,
+      GRAPHQL_URL: config.AO_GRAPHQL_URL,
+      GATEWAY_URL: config.AO_GATEWAY_URL,
     }),
+    networkProcess = IO.init({
+      process: new AOProcess({
+        processId: config.IO_PROCESS_ID,
+        ao: ao,
+      }),
+    }),
+    circuitBreakerOptions = {
+      timeout: config.ARNS_ON_DEMAND_CIRCUIT_BREAKER_TIMEOUT_MS,
+      errorThresholdPercentage:
+        config.ARNS_ON_DEMAND_CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENTAGE,
+      rollingCountTimeout:
+        config.ARNS_ON_DEMAND_CIRCUIT_BREAKER_ROLLING_COUNT_TIMEOUT_MS,
+      resetTimeout: config.ARNS_ON_DEMAND_CIRCUIT_BREAKER_RESET_TIMEOUT_MS,
+    },
   }: {
     log: winston.Logger;
     networkProcess?: AoIORead;
+    ao?: AoClient;
+    circuitBreakerOptions?: CircuitBreaker.Options;
   }) {
     this.log = log.child({
       class: 'OnDemandArNSResolver',
     });
     this.networkProcess = networkProcess;
+    this.ao = ao;
+    // TODO: use getRecords instead of getArNSRecord
+    this.aoCircuitBreaker = new CircuitBreaker(
+      ({ name }: { name: string }) => {
+        return this.networkProcess.getArNSRecord({ name });
+      },
+      {
+        ...circuitBreakerOptions,
+        name: 'getArNSRecord',
+      },
+    );
+    metrics.circuitBreakerMetrics.add(this.aoCircuitBreaker);
   }
 
   async resolve(name: string): Promise<NameResolution> {
     this.log.info('Resolving name...', { name });
     try {
-      const start = Date.now();
       // get the base name which is the last of th array split by _
       const baseName = name.split('_').pop();
       if (baseName === undefined) {
         throw new Error('Invalid name');
       }
-      // find that name in the network process
-      const arnsRecord = await this.networkProcess.getArNSRecord({
-        name: baseName,
-      });
+      // find that name in the network process, using the circuit breaker if there are persistent AO issues
+      const arnsRecord = await this.aoCircuitBreaker.fire({ name: baseName });
 
-      if (arnsRecord === undefined || arnsRecord.processId === undefined) {
-        throw new Error('Invalid name, arns record not found');
+      if (arnsRecord === undefined) {
+        throw new Error('Unexpected undefined from CU');
+      }
+
+      if (arnsRecord === null || arnsRecord.processId === undefined) {
+        return {
+          name,
+          resolvedId: undefined,
+          resolvedAt: Date.now(),
+          ttl: 300,
+          processId: undefined,
+        };
       }
 
       const processId = arnsRecord.processId;
@@ -66,12 +111,7 @@ export class OnDemandArNSResolver implements NameResolver {
       const ant = ANT.init({
         process: new AOProcess({
           processId: processId,
-          ao: connect({
-            MU_URL: config.AO_MU_URL,
-            CU_URL: config.AO_CU_URL,
-            GRAPHQL_URL: config.AO_GRAPHQL_URL,
-            GATEWAY_URL: config.AO_GATEWAY_URL,
-          }),
+          ao: this.ao,
         }),
       });
 
@@ -93,13 +133,6 @@ export class OnDemandArNSResolver implements NameResolver {
       if (!isValidDataId(resolvedId)) {
         throw new Error('Invalid resolved data ID');
       }
-
-      this.log.info('Resolved name', {
-        name,
-        resolvedId,
-        ttl,
-        durationMs: Date.now() - start,
-      });
       return {
         name,
         resolvedId,

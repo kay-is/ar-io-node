@@ -15,41 +15,37 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-import { RootDatabase, open } from 'lmdb';
 
 import { KVBufferStore } from '../types.js';
 
-export class LmdbKVStore implements KVBufferStore {
-  private db: RootDatabase<Buffer, string>;
+export class KvArnsStore implements KVBufferStore {
+  private kvBufferStore: KVBufferStore;
 
-  constructor({ dbPath }: { dbPath: string }) {
-    this.db = open({
-      path: dbPath,
-      encoding: 'binary',
-      commitDelay: 100, // 100ms delay - increases writes per transaction to reduce I/O
-    });
+  constructor({ kvBufferStore }: { kvBufferStore: KVBufferStore }) {
+    this.kvBufferStore = kvBufferStore;
+  }
+
+  private hashKey(key: string): string {
+    return `arns|${key}`;
   }
 
   async get(key: string): Promise<Buffer | undefined> {
-    const value = this.db.get(key);
-    return value;
+    return this.kvBufferStore.get(this.hashKey(key));
+  }
+
+  async set(key: string, value: Buffer): Promise<void> {
+    return this.kvBufferStore.set(this.hashKey(key), value);
   }
 
   async has(key: string): Promise<boolean> {
-    return this.db.doesExist(key);
+    return this.kvBufferStore.has(this.hashKey(key));
   }
 
   async del(key: string): Promise<void> {
-    if (await this.has(key)) {
-      await this.db.remove(key);
-    }
-  }
-
-  async set(key: string, buffer: Buffer): Promise<void> {
-    await this.db.put(key, buffer);
+    return this.kvBufferStore.del(this.hashKey(key));
   }
 
   async close(): Promise<void> {
-    await this.db.close();
+    return this.kvBufferStore.close();
   }
 }

@@ -23,6 +23,8 @@ import * as system from '../system.js';
 import * as events from '../events.js';
 import { release } from '../version.js';
 import { signatureStore } from '../system.js';
+import log from '../log.js';
+import { ParquetExporter } from '../workers/parquet-exporter.js';
 
 export const arIoRouter = Router();
 
@@ -214,6 +216,50 @@ arIoRouter.post(
       }
 
       res.json({ message: 'Data item(s) queued' });
+    } catch (error: any) {
+      res.status(500).send(error?.message);
+    }
+  },
+);
+
+export let parquetExporter: ParquetExporter | null = null;
+
+arIoRouter.post(
+  '/ar-io/admin/export-parquet',
+  express.json(),
+  async (req, res) => {
+    try {
+      const { outputDir, startHeight, endHeight, maxFileRows } = req.body;
+
+      if (
+        typeof outputDir !== 'string' ||
+        outputDir.trim() === '' ||
+        !Number.isInteger(startHeight) ||
+        startHeight < 0 ||
+        !Number.isInteger(endHeight) ||
+        endHeight < 0 ||
+        !Number.isInteger(maxFileRows) ||
+        maxFileRows < 0
+      ) {
+        res.status(400).send('Invalid or missing required parameters');
+        return;
+      }
+
+      parquetExporter = new ParquetExporter({
+        log,
+        duckDbPath: 'data/duckdb/db.duckdb',
+        bundlesDbPath: 'data/sqlite/bundles.db',
+        coreDbPath: 'data/sqlite/core.db',
+      });
+
+      parquetExporter.export({
+        outputDir,
+        startHeight,
+        endHeight,
+        maxFileRows,
+      });
+
+      res.json({ message: 'Parquet export started' });
     } catch (error: any) {
       res.status(500).send(error?.message);
     }

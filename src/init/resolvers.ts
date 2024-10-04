@@ -16,46 +16,76 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 import { Logger } from 'winston';
-import { StandaloneArNSResolver } from '../resolution/standalone-arns-resolver.js';
 import { OnDemandArNSResolver } from '../resolution/on-demand-arns-resolver.js';
 import { TrustedGatewayArNSResolver } from '../resolution/trusted-gateway-arns-resolver.js';
-import { NameResolver } from '../types.js';
+import { KVBufferStore, NameResolver } from '../types.js';
 import { AoIORead } from '@ar.io/sdk';
 import { CompositeArNSResolver } from '../resolution/composite-arns-resolver.js';
+import { RedisKvStore } from '../store/redis-kv-store.js';
+import { NodeKvStore } from '../store/node-kv-store.js';
+import { KvArnsStore } from '../store/kv-arns-store.js';
 
-const supportedResolvers = ['on-demand', 'resolver', 'gateway'] as const;
+const supportedResolvers = ['on-demand', 'gateway'] as const;
 export type ArNSResolverType = (typeof supportedResolvers)[number];
 
 export const isArNSResolverType = (type: string): type is ArNSResolverType => {
   return supportedResolvers.includes(type as ArNSResolverType);
 };
 
+export const createArNSKvStore = ({
+  log,
+  type,
+  redisUrl,
+  useTls,
+  ttlSeconds,
+  maxKeys,
+}: {
+  type: 'redis' | 'node' | string;
+  log: Logger;
+  redisUrl: string;
+  useTls: boolean;
+  ttlSeconds: number;
+  maxKeys: number;
+}): KVBufferStore => {
+  log.info(`Using ${type} as KVBufferStore for arns`, {
+    type,
+    redisUrl,
+    ttlSeconds,
+    maxKeys,
+  });
+  if (type === 'redis') {
+    return new RedisKvStore({
+      log,
+      redisUrl,
+      ttlSeconds,
+      useTls,
+    });
+  }
+  return new NodeKvStore({ ttlSeconds, maxKeys });
+};
+
 export const createArNSResolver = ({
   log,
+  cache,
   resolutionOrder,
-  standaloneArnResolverUrl,
   trustedGatewayUrl,
   networkProcess,
+  overrides,
 }: {
   log: Logger;
+  cache: KvArnsStore;
   resolutionOrder: (ArNSResolverType | string)[];
-  standaloneArnResolverUrl?: string;
   trustedGatewayUrl?: string;
   networkProcess?: AoIORead;
+  overrides?: {
+    ttlSeconds?: number;
+  };
 }): NameResolver => {
-  log.info(`Using ${resolutionOrder} for arns name resolution`);
   const resolverMap: Record<ArNSResolverType, NameResolver | undefined> = {
     'on-demand': new OnDemandArNSResolver({
       log,
       networkProcess,
     }),
-    resolver:
-      standaloneArnResolverUrl !== undefined
-        ? new StandaloneArNSResolver({
-            log,
-            resolverUrl: standaloneArnResolverUrl,
-          })
-        : undefined,
     gateway:
       trustedGatewayUrl !== undefined
         ? new TrustedGatewayArNSResolver({
@@ -79,8 +109,14 @@ export const createArNSResolver = ({
     }
   }
 
+  log.info(
+    `Using ${resolvers.map((r) => r.constructor.name).join(',')} for arns name resolution`,
+  );
+
   return new CompositeArNSResolver({
     log,
     resolvers,
+    cache,
+    overrides,
   });
 };

@@ -209,6 +209,9 @@ export const REDIS_CACHE_URL = env.varOrDefault(
   'redis://localhost:6379',
 );
 
+export const REDIS_USE_TLS =
+  env.varOrDefault('REDIS_USE_TLS', 'false') === 'true';
+
 // Default Redis TTL
 export const REDIS_CACHE_TTL_SECONDS = +env.varOrDefault(
   'REDIS_CACHE_TTL_SECONDS',
@@ -258,10 +261,21 @@ export const WEBHOOK_BLOCK_FILTER = createFilter(
 // ArNS Resolution
 //
 
+export const ARNS_CACHE_TYPE = env.varOrDefault('ARNS_CACHE_TYPE', 'node');
+
 export const ARNS_CACHE_TTL_SECONDS = +env.varOrDefault(
   'ARNS_CACHE_TTL_SECONDS',
   `${60 * 60}`, // 1 hour
 );
+
+export const ARNS_RESOLVER_OVERRIDE_TTL_SECONDS_STRING = env.varOrUndefined(
+  'ARNS_RESOLVER_OVERRIDE_TTL_SECONDS',
+);
+
+export const ARNS_RESOLVER_OVERRIDE_TTL_SECONDS =
+  ARNS_RESOLVER_OVERRIDE_TTL_SECONDS_STRING !== undefined
+    ? +ARNS_RESOLVER_OVERRIDE_TTL_SECONDS_STRING
+    : undefined;
 
 export const ARNS_CACHE_MAX_KEYS = +env.varOrDefault(
   'ARNS_CACHE_MAX_KEYS',
@@ -269,23 +283,35 @@ export const ARNS_CACHE_MAX_KEYS = +env.varOrDefault(
 );
 
 export const ARNS_RESOLVER_PRIORITY_ORDER = env
-  .varOrDefault('ARNS_RESOLVER_PRIORITY_ORDER', 'resolver,on-demand,gateway')
+  .varOrDefault('ARNS_RESOLVER_PRIORITY_ORDER', 'on-demand,gateway')
   .split(',');
 
-export const TRUSTED_ARNS_GATEWAY_URL = env.varOrDefault(
+export const ARNS_ON_DEMAND_CIRCUIT_BREAKER_TIMEOUT_MS = +env.varOrDefault(
+  'ARNS_ON_DEMAND_CIRCUIT_BREAKER_TIMEOUT_MS',
+  `${5 * 1000}`, // 5 seconds
+);
+
+export const ARNS_ON_DEMAND_CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENTAGE =
+  +env.varOrDefault(
+    'ARNS_ON_DEMAND_CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENTAGE',
+    '50',
+  );
+
+export const ARNS_ON_DEMAND_CIRCUIT_BREAKER_ROLLING_COUNT_TIMEOUT_MS =
+  +env.varOrDefault(
+    'ARNS_ON_DEMAND_CIRCUIT_BREAKER_ROLLING_COUNT_TIMEOUT_MS',
+    `${60 * 1000}`, // 1 minute
+  );
+
+export const ARNS_ON_DEMAND_CIRCUIT_BREAKER_RESET_TIMEOUT_MS =
+  +env.varOrDefault(
+    'ARNS_ON_DEMAND_CIRCUIT_BREAKER_RESET_TIMEOUT_MS',
+    `${5 * 60 * 1000}`, // 5 minutes
+  );
+
+// TODO: support multiple gateway urls
+export const TRUSTED_ARNS_GATEWAY_URL = env.varOrUndefined(
   'TRUSTED_ARNS_GATEWAY_URL',
-  'https://__NAME__.arweave.dev',
-);
-
-// @deprecated - use ARNS_RESOLVER_PRIORITY_ORDER instead to specify the order
-// of resolvers to try if the first one is not available.
-export const TRUSTED_ARNS_RESOLVER_TYPE = env.varOrDefault(
-  'TRUSTED_ARNS_RESOLVER_TYPE',
-  'gateway',
-);
-
-export const TRUSTED_ARNS_RESOLVER_URL = env.varOrUndefined(
-  'TRUSTED_ARNS_RESOLVER_URL',
 );
 
 //

@@ -4,7 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Release 18] - 2024-10-01
+
+### Fixed
+
+- Improved performance of data attributes query that was preventing `data.db`
+  WAL flushing.
+
+### Added
+
+- Added WAL `sqlite_wal_checkpoint_pages` Prometheus metric to help monitor WAL
+  flushing.
+- Added a POST `/ar-io/admin/export-parquet` endpoint that can be used to
+  export the contents of the SQLite3 core and bundle DBs as Parquet. To trigger
+  an export, POST JSON containing `outputDir`, `startHeight`, `endHeight`, and
+  `maxFileRows` keys. The resulting Parquet files can then be queried directly
+  using DuckDB or loaded into another system (e.g. ClickHouse). Scripts will be
+  provided to help automate the latter in a future release.
+- Added `ARNS_RESOLVER_OVERRIDE_TTL_SECONDS` that can be used to force ArNS
+  names to refresh before their TTLs expire.
+- Added a GET `/ar-io/resolver/:name` endpoint that returns an ArNS resolution
+  for the given name.
+
+### Changed
+
+- Removed ArNS resolver service in favor of integrated resolver. If a
+  standalone resolver is still desired, the core service can be run with the
+  `START_WRITERS` environment variable set to `false`. This will disable
+  indexing while preserving resolver functionality.
+- Deduplicated writes to `data.db` to improve performance and reduce WAL growth
+  rate.
+
 ## [Release 17] - 2024-09-09
+
+### Notes
+
+- This release includes a **LONG RUNNING MIGRATION**. Your node may appear
+  unresponsive while it is running. It is best to wait for it to complete. If
+  it fails or is interrupted, removing your SQLite DBs (in `data/sqlite` by
+  default) should resolve the issue, provided you are willing to lose your
+  GraphQL index and let your node rebuild it.
 
 ### Fixed
 

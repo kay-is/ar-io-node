@@ -110,4 +110,38 @@ describe('ArNS', function () {
     // Assert that the Location header matches the expected URL
     assert.strictEqual(res.headers['location'], expectedRedirect);
   });
+
+  // FIXME: these can't depend on names that change frequently
+
+  //// verify the /ar-io/resolver/:name endpoint
+  //it('Verifying that /ar-io/resolver/:name returns 200 and resolution data', async function() {
+  //  const txId = 'rhYmL-2y7NC1SX9TauCNzNK9QmZ3h6Vd4pfCC8fgGcQ';
+  //  const res = await axios.get('http://localhost:4000/ar-io/resolver/ardrive');
+
+  //  assert.strictEqual(res.status, 200);
+  //  assert.strictEqual(res.data.txId, txId);
+  //  assert.strictEqual(typeof res.data.ttlSeconds, 'number');
+  //  assert.strictEqual(typeof res.data.processId, 'string');
+  //});
+
+  //// verify the headers are set correctly on the response
+  //it('Verifying that /ar-io/resolver/:name returns 200 and sets the correct headers', async function() {
+  //  const txId = 'rhYmL-2y7NC1SX9TauCNzNK9QmZ3h6Vd4pfCC8fgGcQ';
+  //  const res = await axios.get('http://localhost:4000/ar-io/resolver/ardrive');
+
+  //  assert.strictEqual(res.headers['x-arns-resolved-id'], txId);
+  //  assert.strictEqual(typeof res.headers['x-arns-ttl-seconds'], 'string');
+  //  assert.strictEqual(typeof res.headers['x-arns-process-id'], 'string');
+  //});
+
+  it('Verifying that /ar-io/resolver/:name returns 404 for nonexistent name', async function () {
+    const res = await axios.get(
+      'http://localhost:4000/ar-io/resolver/nonexistent',
+      {
+        validateStatus: (status) => status === 404, // only accept 404 status
+      },
+    );
+
+    assert.strictEqual(res.status, 404);
+  });
 });

@@ -118,10 +118,22 @@ export const arweaveTxFetchCounter = new promClient.Counter({
 // SQLite metrics
 //
 
-export const methodDurationSummary = new promClient.Summary({
+export const sqliteMethodDurationSummary = new promClient.Summary({
   name: 'standalone_sqlite_method_duration_seconds',
-  help: 'Count of failed Arweave peer info requests',
+  help: 'StandaloneSqlite method call durations',
   labelNames: ['worker', 'role', 'method'],
+});
+
+export const sqliteMethodDuplicateCallsCounter = new promClient.Counter({
+  name: 'standalone_sqlite_method_duplicate_calls_total',
+  help: 'StandaloneSqlite method call duplicate count',
+  labelNames: ['method'],
+});
+
+export const sqliteWalCheckpointPages = new promClient.Gauge({
+  name: 'sqlite_wal_checkpoint_pages',
+  help: 'Number of pages in the WAL',
+  labelNames: ['db', 'type'],
 });
 
 //
@@ -178,6 +190,21 @@ export const redisConnectionErrorsCounter = new promClient.Counter({
 export const redisErrorCounter = new promClient.Counter({
   name: 'redis_errors_total',
   help: 'Number of errors redis cache has received',
+});
+
+export const arnsCacheHitCounter = new promClient.Counter({
+  name: 'arns_cache_hit_total',
+  help: 'Number of hits in the arns cache',
+});
+
+export const arnsCacheMissCounter = new promClient.Counter({
+  name: 'arns_cache_miss_total',
+  help: 'Number of misses in the arns cache',
+});
+
+export const arnsResolutionTime = new promClient.Summary({
+  name: 'arns_resolution_time_ms',
+  help: 'Time in ms it takes to resolve an arns name',
 });
 
 // Data source metrics

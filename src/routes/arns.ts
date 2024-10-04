@@ -22,6 +22,9 @@ import { createArnsMiddleware } from '../middleware/arns.js';
 import { createSandboxMiddleware } from '../middleware/sandbox.js';
 import * as system from '../system.js';
 import { dataHandler } from './data/index.js';
+import { headerNames } from '../constants.js';
+import { sendNotFound } from './data/handlers.js';
+import { DEFAULT_ARNS_TTL_SECONDS } from '../resolution/trusted-gateway-arns-resolver.js';
 
 export const arnsRouter = Router();
 
@@ -39,3 +42,35 @@ if (config.ARNS_ROOT_HOST !== undefined) {
     }),
   );
 }
+
+arnsRouter.get('/ar-io/resolver/:name', async (req, res) => {
+  const { name } = req.params;
+  // TODO: replace this with the same request cache used in arns middleware
+  const resolved = await system.nameResolver.resolve(name);
+  if (resolved === undefined) {
+    sendNotFound(res);
+    return;
+  }
+
+  const { resolvedId, ttl, processId, resolvedAt } = resolved;
+
+  if (resolvedId === undefined) {
+    sendNotFound(res);
+    return;
+  }
+
+  res.header(headerNames.arnsResolvedId, resolvedId);
+  res.header(
+    headerNames.arnsTtlSeconds,
+    ttl.toString() || DEFAULT_ARNS_TTL_SECONDS.toString(),
+  );
+  res.header(headerNames.arnsProcessId, processId);
+
+  // add arns headers
+  res.json({
+    txId: resolvedId,
+    ttlSeconds: ttl,
+    processId,
+    resolvedAt,
+  });
+});

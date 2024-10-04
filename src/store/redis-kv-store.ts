@@ -17,7 +17,6 @@
  */
 import { RedisClientType, commandOptions, createClient } from 'redis';
 import winston from 'winston';
-
 import * as metrics from '../metrics.js';
 import { KVBufferStore } from '../types.js';
 
@@ -29,21 +28,27 @@ export class RedisKvStore implements KVBufferStore {
   constructor({
     log,
     redisUrl,
+    useTls,
     ttlSeconds,
   }: {
     log: winston.Logger;
     redisUrl: string;
+    useTls: boolean;
     ttlSeconds: number;
   }) {
     this.log = log.child({ class: this.constructor.name });
     this.ttlSeconds = ttlSeconds;
     this.client = createClient({
       url: redisUrl,
+      socket: {
+        tls: useTls,
+      },
     });
     this.client.on('error', (error: any) => {
       this.log.error(`Redis error`, {
         message: error.message,
         stack: error.stack,
+        url: redisUrl,
       });
       metrics.redisErrorCounter.inc();
     });
@@ -51,12 +56,11 @@ export class RedisKvStore implements KVBufferStore {
       this.log.error(`Redis connection error`, {
         message: error.message,
         stack: error.stack,
+        url: redisUrl,
       });
       metrics.redisConnectionErrorsCounter.inc();
     });
   }
-
-  // TODO: close connection to redis safely
 
   async get(key: string): Promise<Buffer | undefined> {
     const value = await this.client.get(
@@ -81,5 +85,9 @@ export class RedisKvStore implements KVBufferStore {
     await this.client.set(key, buffer, {
       EX: this.ttlSeconds,
     });
+  }
+
+  async close(): Promise<void> {
+    await this.client.quit();
   }
 }

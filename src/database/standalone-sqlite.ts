@@ -29,6 +29,7 @@ import * as R from 'ramda';
 import sql from 'sql-bricks';
 import * as winston from 'winston';
 import CircuitBreaker from 'opossum';
+import NodeCache from 'node-cache';
 
 // TODO enable eslint
 /* eslint-disable */
@@ -405,6 +406,8 @@ export class StandaloneSqliteDatabaseWorker {
   private bundleFormatIds: { [filter: string]: number } = {};
   private filterIds: { [filter: string]: number } = {};
 
+  private insertDataHashCache: NodeCache;
+
   // Transactions
   resetBundlesToHeightFn: Sqlite.Transaction;
   resetCoreToHeightFn: Sqlite.Transaction;
@@ -761,6 +764,12 @@ export class StandaloneSqliteDatabaseWorker {
         });
       },
     );
+
+    this.insertDataHashCache = new NodeCache({
+      stdTTL: 60 * 7, // 7 minutes
+      checkperiod: 60, // 1 minute
+      useClones: false,
+    });
   }
 
   getMaxHeight() {
@@ -1132,13 +1141,7 @@ export class StandaloneSqliteDatabaseWorker {
     cachedAt?: number;
   }) {
     const hashBuffer = fromB64Url(hash);
-    this.stmts.data.insertDataHash.run({
-      hash: hashBuffer,
-      data_size: dataSize,
-      original_source_content_type: contentType,
-      indexed_at: currentUnixTimestamp(),
-      cached_at: cachedAt,
-    });
+
     this.stmts.data.insertDataId.run({
       id: fromB64Url(id),
       contiguous_data_hash: hashBuffer,
@@ -1151,6 +1154,19 @@ export class StandaloneSqliteDatabaseWorker {
         indexed_at: currentUnixTimestamp(),
       });
     }
+
+    if (this.insertDataHashCache.get(hash)) {
+      return;
+    }
+    this.insertDataHashCache.set(hash, true);
+
+    this.stmts.data.insertDataHash.run({
+      hash: hashBuffer,
+      data_size: dataSize,
+      original_source_content_type: contentType,
+      indexed_at: currentUnixTimestamp(),
+      cached_at: cachedAt,
+    });
   }
 
   getGqlNewTransactionTags(txId: Buffer) {
@@ -2331,8 +2347,10 @@ export class StandaloneSqliteDatabaseWorker {
     });
   }
 
-  cleanupWal(dbName: 'core' | 'bundles' | 'data' | 'moderation'): void {
-    this.dbs[dbName].pragma('wal_checkpoint(TRUNCATE)');
+  cleanupWal(dbName: 'core' | 'bundles' | 'data' | 'moderation') {
+    const walCheckpoint = this.dbs[dbName].pragma('wal_checkpoint(TRUNCATE)');
+
+    return walCheckpoint[0];
   }
 }
 
@@ -2371,14 +2389,13 @@ const WORKER_POOL_SIZES: WorkerPoolSizes = {
 
 export class StandaloneSqliteDatabase
   implements
-    BundleIndex,
-    BlockListValidator,
-    ChainIndex,
-    ChainOffsetIndex,
-    ContiguousDataIndex,
-    GqlQueryable,
-    NestedDataIndexWriter
-{
+  BundleIndex,
+  BlockListValidator,
+  ChainIndex,
+  ChainOffsetIndex,
+  ContiguousDataIndex,
+  GqlQueryable,
+  NestedDataIndexWriter {
   log: winston.Logger;
 
   private workers: {
@@ -2389,13 +2406,13 @@ export class StandaloneSqliteDatabase
     moderation: { read: any[]; write: any[] };
     bundles: { read: any[]; write: any[] };
   } = {
-    core: { read: [], write: [] },
-    data: { read: [], write: [] },
-    gql: { read: [], write: [] },
-    debug: { read: [], write: [] },
-    moderation: { read: [], write: [] },
-    bundles: { read: [], write: [] },
-  };
+      core: { read: [], write: [] },
+      data: { read: [], write: [] },
+      gql: { read: [], write: [] },
+      debug: { read: [], write: [] },
+      moderation: { read: [], write: [] },
+      bundles: { read: [], write: [] },
+    };
   private workQueues: {
     core: { read: any[]; write: any[] };
     data: { read: any[]; write: any[] };
@@ -2404,13 +2421,13 @@ export class StandaloneSqliteDatabase
     moderation: { read: any[]; write: any[] };
     bundles: { read: any[]; write: any[] };
   } = {
-    core: { read: [], write: [] },
-    data: { read: [], write: [] },
-    gql: { read: [], write: [] },
-    debug: { read: [], write: [] },
-    moderation: { read: [], write: [] },
-    bundles: { read: [], write: [] },
-  };
+      core: { read: [], write: [] },
+      data: { read: [], write: [] },
+      gql: { read: [], write: [] },
+      debug: { read: [], write: [] },
+      moderation: { read: [], write: [] },
+      bundles: { read: [], write: [] },
+    };
 
   // Data index circuit breakers
   private getDataParentCircuitBreaker: CircuitBreaker<
@@ -2431,6 +2448,8 @@ export class StandaloneSqliteDatabase
     Parameters<StandaloneSqliteDatabase['getTransactionAttributes']>,
     Awaited<ReturnType<StandaloneSqliteDatabase['getTransactionAttributes']>>
   >;
+
+  private saveDataContentAttributesCache: NodeCache;
 
   constructor({
     log,
@@ -2504,6 +2523,16 @@ export class StandaloneSqliteDatabase
       this.getDataItemAttributesCircuitBreaker,
       this.getTransactionAttributesCircuitBreaker,
     ]);
+
+    //
+    // Initialize method caches
+    //
+
+    this.saveDataContentAttributesCache = new NodeCache({
+      stdTTL: 60 * 7, // 7 minutes
+      checkperiod: 60, // 1 minute
+      useClones: false,
+    });
 
     //
     // Initialize workers
@@ -2622,7 +2651,7 @@ export class StandaloneSqliteDatabase
     method: WorkerMethodName,
     args: any,
   ): Promise<any> {
-    const end = metrics.methodDurationSummary.startTimer({
+    const end = metrics.sqliteMethodDurationSummary.startTimer({
       worker: workerName,
       role,
       method,
@@ -2780,6 +2809,15 @@ export class StandaloneSqliteDatabase
     dataSize: number;
     contentType?: string;
   }) {
+    if (this.saveDataContentAttributesCache.get(id)) {
+      metrics.sqliteMethodDuplicateCallsCounter.inc({
+        method: 'saveDataContentAttributes',
+      });
+      return Promise.resolve();
+    }
+
+    this.saveDataContentAttributesCache.set(id, true);
+
     return this.queueWrite('data', 'saveDataContentAttributes', [
       {
         id,
@@ -2934,7 +2972,27 @@ export class StandaloneSqliteDatabase
   }
 
   async cleanupWal(dbName: WorkerPoolName): Promise<void> {
-    return this.queueWrite(dbName, 'cleanupWal', [dbName]);
+    return this.queueWrite(dbName, 'cleanupWal', [dbName]).then(
+      (walCheckpoint) => {
+        this.log.info('WAL checkpoint', {
+          dbName,
+          walCheckpoint,
+        });
+
+        metrics.sqliteWalCheckpointPages.set(
+          { db: dbName, type: 'busy' },
+          walCheckpoint.busy,
+        );
+        metrics.sqliteWalCheckpointPages.set(
+          { db: dbName, type: 'log' },
+          walCheckpoint.log,
+        );
+        metrics.sqliteWalCheckpointPages.set(
+          { db: dbName, type: 'checkpointed' },
+          walCheckpoint.checkpointed,
+        );
+      },
+    );
   }
 }
 
@@ -3077,8 +3135,8 @@ if (!isMainThread) {
           parentPort?.postMessage(null);
           break;
         case 'cleanupWal':
-          worker.cleanupWal(args[0]);
-          parentPort?.postMessage(undefined);
+          const walCheckpoint = worker.cleanupWal(args[0]);
+          parentPort?.postMessage(walCheckpoint);
           break;
         case 'terminate':
           parentPort?.postMessage(null);

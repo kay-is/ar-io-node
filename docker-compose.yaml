@@ -25,7 +25,7 @@ services:
       - observer
 
   core:
-    image: ghcr.io/ar-io/ar-io-core:${CORE_IMAGE_TAG:-1409dad19dfe3f3eecdaa2345cc498081594bc70}
+    image: ghcr.io/ar-io/ar-io-core:${CORE_IMAGE_TAG:-39e1ed9c487ebd7290f39410d1e5ea1dc1bf4c59}
     build:
       context: .
     restart: on-failure
@@ -36,6 +36,7 @@ services:
       - ${CONTIGUOUS_DATA_PATH:-./data/contiguous}:/app/data/contiguous
       - ${HEADERS_DATA_PATH:-./data/headers}:/app/data/headers
       - ${SQLITE_DATA_PATH:-./data/sqlite}:/app/data/sqlite
+      - ${DUCKDB_DATA_PATH:-./data/duckdb}:/app/data/duckdb
       - ${TEMP_DATA_PATH:-./data/tmp}:/app/data/tmp
       - ${LMDB_DATA_PATH:-./data/lmdb}:/app/data/lmdb
     environment:
@@ -63,6 +64,7 @@ services:
       - IO_PROCESS_ID=${IO_PROCESS_ID:-}
       - CHAIN_CACHE_TYPE=${CHAIN_CACHE_TYPE:-redis}
       - REDIS_CACHE_URL=${REDIS_CACHE_URL:-redis://redis:6379}
+      - REDIS_USE_TLS=${REDIS_USE_TLS:-false}
       - REDIS_CACHE_TTL_SECONDS=${REDIS_CACHE_TTL_SECONDS:-}
       - NODE_JS_MAX_OLD_SPACE_SIZE=${NODE_JS_MAX_OLD_SPACE_SIZE:-}
       - ENABLE_FS_HEADER_CACHE_CLEANUP=${ENABLE_FS_HEADER_CACHE_CLEANUP:-true}
@@ -71,11 +73,12 @@ services:
       - WEBHOOK_INDEX_FILTER=${WEBHOOK_INDEX_FILTER:-}
       - WEBHOOK_BLOCK_FILTER=${WEBHOOK_BLOCK_FILTER:-}
       - CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD=${CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD:-}
-      - TRUSTED_ARNS_RESOLVER_URL=${TRUSTED_ARNS_RESOLVER_URL:-}
       - TRUSTED_ARNS_GATEWAY_URL=${TRUSTED_ARNS_GATEWAY_URL:-https://__NAME__.arweave.net}
       - ARNS_RESOLVER_PRIORITY_ORDER=${ARNS_RESOLVER_PRIORITY_ORDER:-on-demand,gateway}
+      - ARNS_RESOLVER_OVERRIDE_TTL_SECONDS=${ARNS_RESOLVER_OVERRIDE_TTL_SECONDS:-}
       - ARNS_CACHE_TTL_SECONDS=${ARNS_CACHE_TTL_SECONDS:-3600}
       - ARNS_CACHE_MAX_KEYS=${ARNS_CACHE_MAX_KEYS:-10000}
+      - ARNS_CACHE_TYPE=${ARNS_CACHE_TYPE:-redis}
       - ENABLE_MEMPOOL_WATCHER=${ENABLE_MEMPOOL_WATCHER:-false}
       - MEMPOOL_POOLING_INTERVAL_MS=${MEMPOOL_POOLING_INTERVAL_MS:-}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
@@ -84,7 +87,7 @@ services:
       - AWS_ENDPOINT=${AWS_ENDPOINT:-}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
       - AWS_S3_PREFIX=${AWS_S3_PREFIX:-}
-      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-17}
+      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-18}
       - CHUNK_POST_URLS=${CHUNK_POST_URLS:-}
       - CHUNK_POST_RESPONSE_TIMEOUT_MS=${CHUNK_POST_RESPONSE_TIMEOUT_MS:-}
       - CHUNK_POST_ABORT_TIMEOUT_MS=${CHUNK_POST_ABORT_TIMEOUT_MS:-}
@@ -113,7 +116,7 @@ services:
       - ar-io-network
 
   observer:
-    image: ghcr.io/ar-io/ar-io-observer:${OBSERVER_IMAGE_TAG:-4761f3b7ce06538e2be431621a82e10f0cd37787}
+    image: ghcr.io/ar-io/ar-io-observer:${OBSERVER_IMAGE_TAG:-d907ca69c177a26b2bc7ab22a8329d1d8ee16a89}
     restart: on-failure
     ports:
       - 5050:5050
@@ -131,33 +134,11 @@ services:
       - REPORT_GENERATION_INTERVAL_MS=${REPORT_GENERATION_INTERVAL_MS:-}
       - RUN_OBSERVER=${RUN_OBSERVER:-true}
       - MIN_RELEASE_NUMBER=${MIN_RELEASE_NUMBER:-0}
-      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-17}
+      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-18}
       - AO_CU_URL=${AO_CU_URL:-}
       - AO_MU_URL=${AO_MU_URL:-}
       - AO_GATEWAY_URL=${AO_GATEWAY_URL:-}
       - AO_GRAPHQL_URL=${AO_GRAPHQL_URL:-}
-    networks:
-      - ar-io-network
-
-  resolver:
-    image: ghcr.io/ar-io/arns-resolver:${RESOLVER_IMAGE_TAG:-7fe02ecda2027e504248d3f3716579f60b561de5}
-    restart: on-failure
-    ports:
-      - 6000:6000
-    environment:
-      - PORT=6000
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - IO_PROCESS_ID=${IO_PROCESS_ID:-}
-      - RUN_RESOLVER=${RUN_RESOLVER:-false}
-      - EVALUATION_INTERVAL_MS=${EVALUATION_INTERVAL_MS:-}
-      - ARNS_CACHE_TTL_MS=${RESOLVER_CACHE_TTL_MS:-}
-      - ARNS_CACHE_PATH=${ARNS_CACHE_PATH:-./data/arns}
-      - AO_CU_URL=${AO_CU_URL:-}
-      - AO_MU_URL=${AO_MU_URL:-}
-      - AO_GATEWAY_URL=${AO_GATEWAY_URL:-}
-      - AO_GRAPHQL_URL=${AO_GRAPHQL_URL:-}
-    volumes:
-      - ${ARNS_CACHE_PATH:-./data/arns}:/app/data/arns
     networks:
       - ar-io-network
 
