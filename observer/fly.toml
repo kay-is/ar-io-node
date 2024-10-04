@@ -8,7 +8,7 @@ app = "ar-io-observer"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-observer:4761f3b7ce06538e2be431621a82e10f0cd37787"
+  image = "ghcr.io/ar-io/ar-io-observer:d907ca69c177a26b2bc7ab22a8329d1d8ee16a89"
 
 [env]
   LOG_LEVEL = "info"
