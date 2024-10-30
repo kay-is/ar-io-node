@@ -27,16 +27,46 @@ import * as winston from 'winston';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 
-const EXPORT_COMPLETE = 'export-complete';
-const EXPORT_ERROR = 'export-error';
+type EventName = 'export-complete' | 'export-error' | 'start';
+
+const EXPORT_COMPLETE: EventName = 'export-complete';
+const EXPORT_ERROR: EventName = 'export-error';
+const START: EventName = 'start';
+
+type Message = {
+  eventName: EventName;
+  error?: string;
+  stack?: string;
+};
+
+type ExportStatus = 'not_started' | 'running' | 'completed' | 'errored';
+
+const NOT_STARTED: ExportStatus = 'not_started';
+const RUNNING: ExportStatus = 'running';
+const COMPLETED: ExportStatus = 'completed';
+const ERRORED: ExportStatus = 'errored';
+
+type ExportData = {
+  status: ExportStatus;
+  outputDir?: string;
+  startHeight?: number;
+  endHeight?: number;
+  maxFileRows?: number;
+  durationInSeconds?: number;
+  endTime?: string;
+  endTimestamp?: number;
+  error?: string;
+};
 
 export class ParquetExporter {
   private log: winston.Logger;
   private worker: Worker | null = null;
-  private isExporting = false;
   private duckDbPath: string;
   private bundlesDbPath: string;
   private coreDbPath: string;
+  private exportStatus: ExportData = {
+    status: NOT_STARTED,
+  };
 
   constructor({
     log,
@@ -66,11 +96,13 @@ export class ParquetExporter {
     endHeight: number;
     maxFileRows: number;
   }): Promise<void> {
-    if (this.isExporting) {
-      this.log.error('An export is already in progress');
-      return;
+    if (this.exportStatus.status === RUNNING) {
+      const error = new Error('An export is already in progress');
+      this.log.error(error.message);
+      return Promise.reject(error);
     }
-    this.isExporting = true;
+
+    this.exportStatus.status = RUNNING;
 
     return new Promise((resolve, reject) => {
       const workerUrl = new URL('./parquet-exporter.js', import.meta.url);
@@ -98,13 +130,13 @@ export class ParquetExporter {
           maxFileRows,
         });
 
-        this.worker?.postMessage('start');
+        this.worker?.postMessage({ eventName: START });
       });
 
-      this.worker.on('message', (message: any) => {
+      this.worker.on('message', (message: Message) => {
         if (message.eventName === EXPORT_COMPLETE) {
-          const endTime = Date.now();
-          const durationInSeconds = (endTime - startTime) / 1000; // Convert to seconds
+          const endTime = new Date();
+          const durationInSeconds = (endTime.getTime() - startTime) / 1000; // Convert to seconds
 
           this.log.info(`Parquet export completed`, {
             outputDir,
@@ -114,34 +146,66 @@ export class ParquetExporter {
             durationInSeconds,
           });
 
-          this.isExporting = false;
-          this.worker?.terminate();
+          this.exportStatus = {
+            status: COMPLETED,
+            outputDir,
+            startHeight,
+            endHeight,
+            maxFileRows,
+            endTime: endTime.toISOString(),
+            endTimestamp: endTime.getTime(),
+            durationInSeconds,
+          };
+
           resolve();
         } else if (message.eventName === EXPORT_ERROR) {
-          this.isExporting = false;
-          this.worker?.terminate();
+          const endTime = new Date();
+          const durationInSeconds = (endTime.getTime() - startTime) / 1000; // Convert to seconds
+
+          this.exportStatus = {
+            status: ERRORED,
+            error: message.error,
+            endTime: endTime.toISOString(),
+            endTimestamp: endTime.getTime(),
+            durationInSeconds,
+          };
+
           this.log.error('Parquet export error', {
             error: message.error,
             stack: message.stack,
+            durationInSeconds,
           });
+
           reject(new Error(message.error));
         }
       });
 
       this.worker.on('error', (error) => {
+        this.exportStatus = {
+          status: ERRORED,
+          error: error.message,
+        };
+
         this.log.error('Worker error', error);
-        this.isExporting = false;
-        this.worker?.terminate();
+
         reject(error);
       });
 
       this.worker.on('exit', (code) => {
         if (code !== 0) {
-          this.isExporting = false;
+          this.exportStatus = {
+            status: ERRORED,
+            error: `Worker stopped with exit code ${code}`,
+          };
+
           reject(new Error(`Worker stopped with exit code ${code}`));
         }
       });
     });
+  }
+
+  status(): ExportData {
+    return this.exportStatus;
   }
 
   async stop(): Promise<void> {
@@ -506,6 +570,27 @@ const getRowCountForHeight = async (
 };
 
 if (!isMainThread) {
+  const gracefulExit = async ({
+    connection,
+    db,
+    duckDbPath,
+    statusCode,
+  }: {
+    connection: Connection;
+    db: Database;
+    duckDbPath: string;
+    statusCode: number;
+  }) => {
+    await connection.close();
+    await db.close();
+
+    // Delete the duckdb file
+    rmSync(duckDbPath, { recursive: true, force: true });
+    rmSync(`${duckDbPath}.wal`, { force: true });
+
+    process.exit(statusCode);
+  };
+
   const runExport = async (data: any) => {
     const {
       outputDir,
@@ -573,7 +658,6 @@ if (!isMainThread) {
         endHeight,
         maxFileRows,
       });
-
       await exportToParquet({
         db: connection,
         outputDir,
@@ -582,7 +666,6 @@ if (!isMainThread) {
         endHeight,
         maxFileRows,
       });
-
       await exportToParquet({
         db: connection,
         outputDir,
@@ -593,24 +676,31 @@ if (!isMainThread) {
       });
 
       parentPort?.postMessage({ eventName: EXPORT_COMPLETE });
+
+      await gracefulExit({
+        connection,
+        db,
+        duckDbPath,
+        statusCode: 0,
+      });
     } catch (error: any) {
       parentPort?.postMessage({
         eventName: EXPORT_ERROR,
         error: error.message,
         stack: error.stack,
       });
-    } finally {
-      await connection.close();
-      await db.close();
 
-      // Delete the duckdb file
-      rmSync(duckDbPath, { recursive: true, force: true });
-      rmSync(`${duckDbPath}.wal`, { force: true });
+      await gracefulExit({
+        connection,
+        db,
+        duckDbPath,
+        statusCode: 1,
+      });
     }
   };
 
-  parentPort?.on('message', (message) => {
-    if (message === 'start') {
+  parentPort?.on('message', (message: Message) => {
+    if (message.eventName === START) {
       runExport(workerData);
     }
   });

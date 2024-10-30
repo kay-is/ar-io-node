@@ -941,17 +941,25 @@ export class StandaloneSqliteDatabaseWorker {
       const endHeight = block.height - MAX_FORK_DEPTH;
 
       this.saveCoreStableDataFn(endHeight);
-      this.saveBundlesStableDataFn(endHeight);
 
       this.deleteCoreStaleNewDataFn(
         endHeight,
         maxStableBlockTimestamp - NEW_TX_CLEANUP_WAIT_SECS,
       );
-      this.deleteBundlesStaleNewDataFn(
-        endHeight,
-        maxStableBlockTimestamp - NEW_DATA_ITEM_CLEANUP_WAIT_SECS,
-      );
+
+      return { endHeight, maxStableBlockTimestamp };
     }
+
+    return {};
+  }
+
+  flushStableDataItems(endHeight: number, maxStableBlockTimestamp: number) {
+    this.saveBundlesStableDataFn(endHeight);
+
+    this.deleteBundlesStaleNewDataFn(
+      endHeight,
+      maxStableBlockTimestamp - NEW_DATA_ITEM_CLEANUP_WAIT_SECS,
+    );
   }
 
   getDataAttributes(id: string) {
@@ -981,7 +989,7 @@ export class StandaloneSqliteDatabaseWorker {
       contentEncoding: coreRow?.content_encoding,
       isManifest: contentType === MANIFEST_CONTENT_TYPE,
       stable: coreRow?.stable === true,
-      verified: dataRow?.verified === true,
+      verified: dataRow?.verified === 1,
     };
   }
 
@@ -1127,31 +1135,43 @@ export class StandaloneSqliteDatabaseWorker {
 
   saveDataContentAttributes({
     id,
+    parentId,
     dataRoot,
     hash,
     dataSize,
     contentType,
     cachedAt,
+    verified,
   }: {
     id: string;
+    parentId?: string;
     dataRoot?: string;
     hash: string;
     dataSize: number;
     contentType?: string;
     cachedAt?: number;
+    verified?: boolean;
   }) {
     const hashBuffer = fromB64Url(hash);
+    const currentTimestamp = currentUnixTimestamp();
+    const isVerified = verified ? 1 : 0;
 
     this.stmts.data.insertDataId.run({
       id: fromB64Url(id),
+      parent_id: parentId ? fromB64Url(parentId) : null,
       contiguous_data_hash: hashBuffer,
-      indexed_at: currentUnixTimestamp(),
+      indexed_at: currentTimestamp,
+      verified: isVerified,
+      verified_at: currentTimestamp,
     });
+
     if (dataRoot !== undefined) {
       this.stmts.data.insertDataRoot.run({
         data_root: fromB64Url(dataRoot),
         contiguous_data_hash: hashBuffer,
-        indexed_at: currentUnixTimestamp(),
+        indexed_at: currentTimestamp,
+        verified: isVerified,
+        verified_at: currentTimestamp,
       });
     }
 
@@ -1164,7 +1184,7 @@ export class StandaloneSqliteDatabaseWorker {
       hash: hashBuffer,
       data_size: dataSize,
       original_source_content_type: contentType,
-      indexed_at: currentUnixTimestamp(),
+      indexed_at: currentTimestamp,
       cached_at: cachedAt,
     });
   }
@@ -2370,7 +2390,7 @@ const WORKER_POOL_NAMES: Array<WorkerPoolName> = [
   'bundles',
 ];
 
-type WorkerMethodName = keyof StandaloneSqliteDatabase;
+type WorkerMethodName = keyof StandaloneSqliteDatabaseWorker;
 
 type WorkerRoleName = 'read' | 'write';
 const WORKER_ROLE_NAMES: Array<WorkerRoleName> = ['read', 'write'];
@@ -2389,13 +2409,14 @@ const WORKER_POOL_SIZES: WorkerPoolSizes = {
 
 export class StandaloneSqliteDatabase
   implements
-  BundleIndex,
-  BlockListValidator,
-  ChainIndex,
-  ChainOffsetIndex,
-  ContiguousDataIndex,
-  GqlQueryable,
-  NestedDataIndexWriter {
+    BundleIndex,
+    BlockListValidator,
+    ChainIndex,
+    ChainOffsetIndex,
+    ContiguousDataIndex,
+    GqlQueryable,
+    NestedDataIndexWriter
+{
   log: winston.Logger;
 
   private workers: {
@@ -2406,13 +2427,13 @@ export class StandaloneSqliteDatabase
     moderation: { read: any[]; write: any[] };
     bundles: { read: any[]; write: any[] };
   } = {
-      core: { read: [], write: [] },
-      data: { read: [], write: [] },
-      gql: { read: [], write: [] },
-      debug: { read: [], write: [] },
-      moderation: { read: [], write: [] },
-      bundles: { read: [], write: [] },
-    };
+    core: { read: [], write: [] },
+    data: { read: [], write: [] },
+    gql: { read: [], write: [] },
+    debug: { read: [], write: [] },
+    moderation: { read: [], write: [] },
+    bundles: { read: [], write: [] },
+  };
   private workQueues: {
     core: { read: any[]; write: any[] };
     data: { read: any[]; write: any[] };
@@ -2421,13 +2442,13 @@ export class StandaloneSqliteDatabase
     moderation: { read: any[]; write: any[] };
     bundles: { read: any[]; write: any[] };
   } = {
-      core: { read: [], write: [] },
-      data: { read: [], write: [] },
-      gql: { read: [], write: [] },
-      debug: { read: [], write: [] },
-      moderation: { read: [], write: [] },
-      bundles: { read: [], write: [] },
-    };
+    core: { read: [], write: [] },
+    data: { read: [], write: [] },
+    gql: { read: [], write: [] },
+    debug: { read: [], write: [] },
+    moderation: { read: [], write: [] },
+    bundles: { read: [], write: [] },
+  };
 
   // Data index circuit breakers
   private getDataParentCircuitBreaker: CircuitBreaker<
@@ -2651,6 +2672,10 @@ export class StandaloneSqliteDatabase
     method: WorkerMethodName,
     args: any,
   ): Promise<any> {
+    metrics.sqliteInFlightOps.inc({
+      worker: workerName,
+      role,
+    });
     const end = metrics.sqliteMethodDurationSummary.startTimer({
       worker: workerName,
       role,
@@ -2667,7 +2692,13 @@ export class StandaloneSqliteDatabase
       });
       this.drainQueue();
     });
-    ret.finally(() => end());
+    ret.finally(() => {
+      metrics.sqliteInFlightOps.dec({
+        worker: workerName,
+        role,
+      });
+      end();
+    });
     return ret;
   }
 
@@ -2742,16 +2773,22 @@ export class StandaloneSqliteDatabase
     return this.queueWrite('bundles', 'saveBundle', [bundle]);
   }
 
-  saveBlockAndTxs(
+  async saveBlockAndTxs(
     block: PartialJsonBlock,
     txs: PartialJsonTransaction[],
     missingTxIds: string[],
   ): Promise<void> {
-    return this.queueWrite('core', 'saveBlockAndTxs', [
-      block,
-      txs,
-      missingTxIds,
-    ]);
+    const { endHeight, maxStableBlockTimestamp } = await this.queueWrite(
+      'core',
+      'saveBlockAndTxs',
+      [block, txs, missingTxIds],
+    );
+    if (endHeight !== undefined && maxStableBlockTimestamp !== undefined) {
+      await this.queueWrite('bundles', 'flushStableDataItems', [
+        endHeight,
+        maxStableBlockTimestamp,
+      ]);
+    }
   }
 
   async getDataAttributes(
@@ -2798,16 +2835,20 @@ export class StandaloneSqliteDatabase
 
   saveDataContentAttributes({
     id,
+    parentId,
     dataRoot,
     hash,
     dataSize,
     contentType,
+    verified,
   }: {
     id: string;
+    parentId?: string;
     dataRoot?: string;
     hash: string;
     dataSize: number;
     contentType?: string;
+    verified?: boolean;
   }) {
     if (this.saveDataContentAttributesCache.get(id)) {
       metrics.sqliteMethodDuplicateCallsCounter.inc({
@@ -2821,10 +2862,12 @@ export class StandaloneSqliteDatabase
     return this.queueWrite('data', 'saveDataContentAttributes', [
       {
         id,
+        parentId,
         dataRoot,
         hash,
         dataSize,
         contentType,
+        verified,
       },
     ]);
   }
@@ -3068,9 +3111,18 @@ if (!isMainThread) {
           parentPort?.postMessage(null);
           break;
         case 'saveBlockAndTxs':
-          const [block, txs, missingTxIds] = args;
-          worker.saveBlockAndTxs(block, txs, missingTxIds);
-          parentPort?.postMessage(null);
+          {
+            const [block, txs, missingTxIds] = args;
+            const ret = worker.saveBlockAndTxs(block, txs, missingTxIds);
+            parentPort?.postMessage(ret);
+          }
+          break;
+        case 'flushStableDataItems':
+          {
+            const [endHeight, maxStableBlockTimestamp] = args;
+            worker.flushStableDataItems(endHeight, maxStableBlockTimestamp);
+            parentPort?.postMessage(null);
+          }
           break;
         case 'getDataAttributes':
           const dataAttributes = worker.getDataAttributes(args[0]);

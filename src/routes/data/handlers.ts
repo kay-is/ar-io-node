@@ -41,6 +41,29 @@ const DEFAULT_CONTENT_TYPE = 'application/octet-stream';
 
 const REQUEST_METHOD_HEAD = 'HEAD';
 
+const setDigestStableVerifiedHeaders = ({
+  res,
+  dataAttributes,
+  data,
+}: {
+  res: Response;
+  dataAttributes: ContiguousDataAttributes | undefined;
+  data: ContiguousData;
+}) => {
+  if (dataAttributes !== undefined) {
+    res.setHeader(headerNames.stable, dataAttributes.stable ? 'true' : 'false');
+    res.setHeader(
+      headerNames.verified,
+      dataAttributes.verified && data.cached ? 'true' : 'false',
+    );
+
+    if (dataAttributes.hash !== undefined && data.cached) {
+      res.setHeader(headerNames.digest, dataAttributes.hash);
+      res.setHeader('ETag', dataAttributes.hash);
+    }
+  }
+};
+
 const setDataHeaders = ({
   res,
   dataAttributes,
@@ -99,6 +122,8 @@ const setDataHeaders = ({
   if (dataAttributes?.contentEncoding !== undefined) {
     res.header('Content-Encoding', dataAttributes.contentEncoding);
   }
+
+  setDigestStableVerifiedHeaders({ res, dataAttributes, data });
 };
 
 const getRequestAttributes = (req: Request): RequestAttributes => {
@@ -146,6 +171,8 @@ const handleRangeRequest = (
     dataAttributes?.contentType ??
     data.sourceContentType ??
     'application/octet-stream';
+
+  setDigestStableVerifiedHeaders({ res, dataAttributes, data });
 
   if (isSingleRange) {
     const totalSize = data.size;

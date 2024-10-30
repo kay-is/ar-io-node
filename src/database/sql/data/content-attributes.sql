@@ -14,25 +14,54 @@ INSERT INTO contiguous_data (
 ) ON CONFLICT DO NOTHING
 
 -- insertDataId
+WITH ParentStatus AS (
+  SELECT CASE
+    WHEN EXISTS (
+      SELECT 1
+      FROM contiguous_data_ids AS parent
+      WHERE parent.id = :parent_id
+      AND parent.verified = 1
+    ) THEN 1
+    ELSE :verified
+  END AS verified_status
+)
 INSERT OR REPLACE INTO contiguous_data_ids (
   id,
   contiguous_data_hash,
-  indexed_at
-) VALUES (
+  verified,
+  indexed_at,
+  verified_at
+)
+SELECT
   :id,
   :contiguous_data_hash,
-  :indexed_at
-)
+  verified_status,
+  :indexed_at,
+  CASE
+    WHEN verified_status = 1 THEN :verified_at
+    ELSE NULL
+  END
+FROM ParentStatus
+WHERE
+  NOT EXISTS (
+    SELECT 1
+    FROM contiguous_data_ids
+    WHERE id = :id AND verified = 1
+  );
 
 -- insertDataRoot
 INSERT OR REPLACE INTO data_roots (
   data_root,
   contiguous_data_hash,
-  indexed_at
+  verified,
+  indexed_at,
+  verified_at
 ) VALUES (
   :data_root,
   :contiguous_data_hash,
-  :indexed_at
+  :verified,
+  :indexed_at,
+  :verified_at
 )
 
 -- selectDataAttributes
