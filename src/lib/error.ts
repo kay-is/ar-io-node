@@ -16,4 +16,22 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-export const release = '20';
+interface DetailedErrorOptions {
+  stack?: string;
+  [key: string]: any; // Allow any other properties with any value type
+}
+
+export class DetailedError extends Error {
+  constructor(message: string, options?: DetailedErrorOptions) {
+    super(message);
+    this.name = this.constructor.name;
+    Object.assign(this, options);
+    this.stack = options?.stack ?? new Error().stack;
+  }
+
+  toJSON() {
+    return {
+      ...this,
+    };
+  }
+}

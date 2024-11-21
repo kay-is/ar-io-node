@@ -54,6 +54,7 @@ app.use(
       headerNames.arnsResolvedId,
       headerNames.arnsTtlSeconds,
       headerNames.arnsProcessId,
+      headerNames.arnsResolvedAt,
     ],
   }),
 );
@@ -81,11 +82,4 @@ apolloServerInstanceGql.start().then(() => {
   });
 });
 
-// Handle shutdown signals
-process.on('SIGINT', async () => {
-  await system.shutdown(server);
-});
-
-process.on('SIGTERM', async () => {
-  await system.shutdown(server);
-});
+export { server };

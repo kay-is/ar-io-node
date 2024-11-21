@@ -67,6 +67,7 @@ import {
   TransactionAttributes,
 } from '../types.js';
 import * as config from '../config.js';
+import { DetailedError } from '../lib/error.js';
 
 const CPU_COUNT = os.cpus().length;
 const MAX_WORKER_COUNT = 12;
@@ -77,11 +78,6 @@ const STABLE_FLUSH_INTERVAL = 5;
 const NEW_TX_CLEANUP_WAIT_SECS = 60 * 60 * 2;
 const NEW_DATA_ITEM_CLEANUP_WAIT_SECS = 60 * 60 * 2;
 const BUNDLE_REPROCESS_WAIT_SECS = 60 * 15;
-const LOW_SELECTIVITY_TAG_NAMES = new Set(['App-Name', 'Content-Type']);
-
-function tagJoinSortPriority(tag: { name: string; values: string[] }) {
-  return LOW_SELECTIVITY_TAG_NAMES.has(tag.name) ? 1 : 0;
-}
 
 export function encodeTransactionGqlCursor({
   height,
@@ -340,6 +336,7 @@ export function dataItemToDbRows(item: NormalizedDataItem, height?: number) {
       owner_offset: item.owner_offset,
       owner_size: item.owner_size,
       parent_id: parentId,
+      root_parent_offset: item.root_parent_offset,
       root_transaction_id: rootTxId,
       signature: item.signature !== null ? fromB64Url(item.signature) : null,
       signature_offset: item.signature_offset,
@@ -408,6 +405,8 @@ export class StandaloneSqliteDatabaseWorker {
 
   private insertDataHashCache: NodeCache;
 
+  private tagSelectivity: Record<string, number>;
+
   // Transactions
   resetBundlesToHeightFn: Sqlite.Transaction;
   resetCoreToHeightFn: Sqlite.Transaction;
@@ -425,12 +424,14 @@ export class StandaloneSqliteDatabaseWorker {
     dataDbPath,
     moderationDbPath,
     bundlesDbPath,
+    tagSelectivity,
   }: {
     log: winston.Logger;
     coreDbPath: string;
     dataDbPath: string;
     moderationDbPath: string;
     bundlesDbPath: string;
+    tagSelectivity: Record<string, number>;
   }) {
     this.log = log;
 
@@ -770,6 +771,8 @@ export class StandaloneSqliteDatabaseWorker {
       checkperiod: 60, // 1 minute
       useClones: false,
     });
+
+    this.tagSelectivity = tagSelectivity;
   }
 
   getMaxHeight() {
@@ -981,12 +984,21 @@ export class StandaloneSqliteDatabaseWorker {
     const hash = dataRow?.hash;
     const dataRoot = coreRow?.data_root;
 
+    const rootTransactionId =
+      coreRow?.root_transaction_id !== null &&
+      coreRow?.root_transaction_id !== undefined
+        ? toB64Url(coreRow.root_transaction_id)
+        : undefined;
+
     return {
       hash: hash ? toB64Url(hash) : undefined,
       dataRoot: dataRoot ? toB64Url(dataRoot) : undefined,
       size: coreRow?.data_size ?? dataRow?.data_size,
-      contentType,
       contentEncoding: coreRow?.content_encoding,
+      contentType,
+      rootTransactionId,
+      rootParentOffset: coreRow?.root_parent_offset,
+      dataOffset: coreRow?.data_offset,
       isManifest: contentType === MANIFEST_CONTENT_TYPE,
       stable: coreRow?.stable === true,
       verified: dataRow?.verified === 1,
@@ -1458,16 +1470,29 @@ export class StandaloneSqliteDatabaseWorker {
     }
 
     if (tags) {
-      // To improve performance, force tags with large result sets to be last
-      const sortByTagJoinPriority = R.sortBy(tagJoinSortPriority);
-      sortByTagJoinPriority(tags).forEach((tag, index) => {
+      // Order tag joins by selectivity (most selective first) to narrow
+      // results as early as possible
+      const sortByTagSelectivity = R.sortBy(
+        (tag: { name: string; values: string[] }) => {
+          return -(this.tagSelectivity[tag.name] ?? 0);
+        },
+      );
+      sortByTagSelectivity(tags).forEach((tag, index) => {
         const tagAlias = `"${index}_${index}"`;
         let joinCond: { [key: string]: string };
         if (source === 'stable_txs' || source === 'stable_items') {
           if (index === 0) {
-            heightSortTableAlias = tagAlias;
-            blockTransactionIndexSortTableAlias = tagAlias;
-            dataItemSortTableAlias = tagAlias;
+            if (
+              // Order results by selective tags ...
+              this.tagSelectivity[tag.name] >= 0 ||
+              // ... or non-selective tags if neither recipients nor owners
+              // were specified
+              (recipients?.length === 0 && owners?.length === 0)
+            ) {
+              heightSortTableAlias = tagAlias;
+              blockTransactionIndexSortTableAlias = tagAlias;
+              dataItemSortTableAlias = tagAlias;
+            }
             joinCond = {
               [`${blockTransactionIndexTableAlias}.block_transaction_index`]: `${tagAlias}.block_transaction_index`,
               [`${heightTableAlias}.height`]: `${tagAlias}.height`,
@@ -2478,12 +2503,14 @@ export class StandaloneSqliteDatabase
     dataDbPath,
     moderationDbPath,
     bundlesDbPath,
+    tagSelectivity,
   }: {
     log: winston.Logger;
     coreDbPath: string;
     dataDbPath: string;
     moderationDbPath: string;
     bundlesDbPath: string;
+    tagSelectivity: Record<string, number>;
   }) {
     this.log = log.child({ class: `${this.constructor.name}` });
 
@@ -2569,6 +2596,7 @@ export class StandaloneSqliteDatabase
           dataDbPath,
           moderationDbPath,
           bundlesDbPath,
+          tagSelectivity: tagSelectivity,
         },
       });
 
@@ -2588,9 +2616,15 @@ export class StandaloneSqliteDatabase
           self.workers[pool][role].push({ takeWork });
           takeWork();
         })
-        .on('message', (result) => {
-          if (result === '__ERROR__') {
-            job.reject(new Error('Worker error'));
+        .on('message', async (result) => {
+          if (result && result.stack) {
+            const { message, stack, workerMethod, workerArgs } = result;
+            const error = new DetailedError(message, {
+              stack,
+              workerMethod,
+              workerArgs,
+            });
+            job.reject(error);
           } else {
             job.resolve(result);
           }
@@ -3051,6 +3085,7 @@ if (!isMainThread) {
     dataDbPath: workerData.dataDbPath,
     moderationDbPath: workerData.moderationDbPath,
     bundlesDbPath: workerData.bundlesDbPath,
+    tagSelectivity: workerData.tagSelectivity,
   });
 
   let errorCount = 0;
@@ -3194,14 +3229,29 @@ if (!isMainThread) {
           parentPort?.postMessage(null);
           process.exit(0);
       }
-    } catch (error) {
+    } catch (e: any) {
       if (errorCount > MAX_WORKER_ERRORS) {
         log.error('Too many errors in StandaloneSqlite worker, exiting.');
         process.exit(1);
       }
-      log.error('Error in StandaloneSqlite worker:', error);
+
+      const error = new DetailedError('Error in StandaloneSqlite worker', {
+        stack: e.stack,
+      });
+
+      log.error(error.message, {
+        message: error.message,
+        stack: error.stack,
+        workerMethod: method,
+        workerArgs: args,
+      });
       errorCount++;
-      parentPort?.postMessage('__ERROR__');
+      parentPort?.postMessage({
+        message: error.message,
+        stack: error.stack,
+        workerMethod: method,
+        workerArgs: args,
+      });
     }
   });
 }

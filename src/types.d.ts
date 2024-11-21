@@ -273,6 +273,7 @@ export interface NormalizedBundleDataItem {
   owner_size: number;
   parent_id: string;
   parent_index: number;
+  root_parent_offset: number;
   root_tx_id: string;
   signature: string | null;
   signature_offset: number;
@@ -300,6 +301,7 @@ export interface NormalizedOptimisticDataItem {
   owner_size: null;
   parent_id: null;
   parent_index: null;
+  root_parent_offset: null;
   root_tx_id: null;
   signature: string | null;
   signature_offset: null;
@@ -506,7 +508,10 @@ export interface ContiguousDataAttributes {
   dataRoot?: string;
   size: number;
   contentEncoding?: string;
-  contentType: string | undefined;
+  contentType?: string;
+  rootTransactionId?: string;
+  rootParentOffset?: number;
+  dataOffset?: number;
   isManifest: boolean;
   stable: boolean;
   verified: boolean;

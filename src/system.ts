@@ -17,7 +17,6 @@
  */
 import { default as Arweave } from 'arweave';
 import EventEmitter from 'node:events';
-import { Server } from 'node:http';
 import fs from 'node:fs';
 import { AOProcess, IO } from '@ar.io/sdk';
 import awsLite from '@aws-lite/client';
@@ -83,6 +82,7 @@ import { SignatureFetcher } from './data/signature-fetcher.js';
 import { SQLiteWalCleanupWorker } from './workers/sqlite-wal-cleanup-worker.js';
 import { KvArnsStore } from './store/kv-arns-store.js';
 import { parquetExporter } from './routes/ar-io.js';
+import { server } from './app.js';
 
 process.on('uncaughtException', (error) => {
   metrics.uncaughtExceptionCounter.inc();
@@ -147,6 +147,7 @@ export const db = new StandaloneSqliteDatabase({
   dataDbPath: 'data/sqlite/data.db',
   moderationDbPath: 'data/sqlite/moderation.db',
   bundlesDbPath: 'data/sqlite/bundles.db',
+  tagSelectivity: config.TAG_SELECTIVITY,
 });
 
 export const chainIndex: ChainIndex = db;
@@ -642,13 +643,13 @@ if (dataSqliteWalCleanupWorker !== undefined) {
 
 let isShuttingDown = false;
 
-export const shutdown = async (express: Server) => {
+export const shutdown = async (exitCode = 0) => {
   if (isShuttingDown) {
     log.info('Shutdown already in progress');
   } else {
     isShuttingDown = true;
     log.info('Shutting down...');
-    express.close(async () => {
+    server.close(async () => {
       log.debug('Web server stopped successfully');
       eventEmitter.removeAllListeners();
       arIODataSource.stopUpdatingPeers();
@@ -672,7 +673,16 @@ export const shutdown = async (express: Server) => {
       await headerFsCacheCleanupWorker?.stop();
       await contiguousDataFsCacheCleanupWorker?.stop();
 
-      process.exit(0);
+      process.exit(exitCode);
     });
   }
 };
+
+// Handle shutdown signals
+process.on('SIGINT', async () => {
+  await shutdown();
+});
+
+process.on('SIGTERM', async () => {
+  await shutdown();
+});

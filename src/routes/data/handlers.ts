@@ -73,9 +73,6 @@ const setDataHeaders = ({
   dataAttributes: ContiguousDataAttributes | undefined;
   data: ContiguousData;
 }) => {
-  // TODO add etag
-  // TODO add header indicating stability
-  // TODO add header indicating whether data is verified
   // TODO cached header for zero length data (maybe...)
 
   // Allow range requests
@@ -121,6 +118,20 @@ const setDataHeaders = ({
 
   if (dataAttributes?.contentEncoding !== undefined) {
     res.header('Content-Encoding', dataAttributes.contentEncoding);
+  }
+
+  if (dataAttributes?.rootTransactionId !== undefined) {
+    res.header(headerNames.rootTransactionId, dataAttributes.rootTransactionId);
+  }
+
+  if (
+    dataAttributes?.rootParentOffset !== undefined &&
+    dataAttributes?.dataOffset !== undefined
+  ) {
+    res.header(
+      headerNames.dataItemDataOffset,
+      (dataAttributes.rootParentOffset + dataAttributes.dataOffset).toString(),
+    );
   }
 
   setDigestStableVerifiedHeaders({ res, dataAttributes, data });
@@ -312,22 +323,6 @@ const handleRangeRequest = (
   }
 };
 
-const setRawDataHeaders = (res: Response) => {
-  // Unset CORS headers
-  res.removeHeader('Access-Control-Allow-Origin');
-  res.removeHeader('Access-Control-Allow-Methods');
-  res.removeHeader('Access-Control-Allow-Headers');
-
-  // TODO restict this to non-ArNS, non-manifest domains (requires knowledge of
-  // primary domain)
-  res.header(
-    'Content-Security-Policy',
-    `default-src 'self'; frame-src 'none'; object-src 'none'`,
-  );
-  res.header('Cross-Origin-Opener-Policy', 'same-origin');
-  res.header('Cross-Origin-Embedder-Policy', 'require-corp');
-};
-
 export const sendNotFound = (res: Response) => {
   res.header(
     'Cache-Control',
@@ -407,12 +402,10 @@ export const createRawDataHandler = ({
       // Check if the request includes a Range header
       const rangeHeader = req.headers.range;
       if (rangeHeader !== undefined) {
-        setRawDataHeaders(res);
         handleRangeRequest(log, rangeHeader, res, req, data, dataAttributes);
       } else {
         // Set headers and stream data
         setDataHeaders({ res, dataAttributes, data });
-        setRawDataHeaders(res);
         res.header('Content-Length', data.size.toString());
 
         if (req.method === REQUEST_METHOD_HEAD) {
