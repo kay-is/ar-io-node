@@ -7,7 +7,7 @@ app = "ar-io-node-proxy"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-envoy:a79c9d6a3991cf17dc9928520ae3123a66b11173"
+  image = "ghcr.io/ar-io/ar-io-envoy:0d3e2a9594f0520a2f374450851fd4ddf1321c09"
 
 [env]
   LOG_LEVEL = "info"
