@@ -17,17 +17,10 @@
  */
 
 declare module '@aws-lite/s3' {
-  import {
-    S3ClientConfig,
-    GetObjectCommandInput,
-    PutObjectCommandInput,
-    GetObjectCommandOutput,
-    PutObjectCommandOutput,
-  } from '@aws-sdk/client-s3';
+  import { AwsLiteS3 } from '@aws-lite/s3-types';
 
-  interface S3Client {
-    getObject(params: GetObjectCommandInput): Promise<GetObjectCommandOutput>;
-  }
-
-  export default function s3(options: S3ClientConfig): S3Client;
+  const plugin: {
+    exports: AwsLiteS3;
+  };
+  export default plugin;
 }

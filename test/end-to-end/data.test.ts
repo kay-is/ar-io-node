@@ -353,6 +353,9 @@ describe('X-AR-IO-Data-Item-Data-Offset header', function () {
         ANS104_UNBUNDLE_FILTER: '{"always": true}',
         ANS104_INDEX_FILTER: '{"always": true}',
         ADMIN_API_KEY: 'secret',
+        TRUSTED_GATEWAYS_URLS:
+          '{"https://arweave.net": 1, "https://ar-io.dev": 2}',
+        BACKGROUND_RETRIEVAL_ORDER: 'trusted-gateways',
       })
       .withBuild()
       .withWaitStrategy('core-1', Wait.forHttp('/ar-io/info', 4000))
@@ -722,7 +725,8 @@ describe('X-AR-IO headers', function () {
           START_HEIGHT: '0',
           STOP_HEIGHT: '0',
           ARNS_ROOT_HOST: 'ar-io.localhost',
-          TRUSTED_GATEWAY_URL: 'http://host.testcontainers.internal:4001',
+          TRUSTED_GATEWAYS_URLS:
+            '{"http://host.testcontainers.internal:4001": 1}',
         })
         .withExposedPorts(4000)
         .withWaitStrategy(Wait.forHttp('/ar-io/info', 4000))

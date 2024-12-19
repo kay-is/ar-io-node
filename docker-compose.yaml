@@ -25,7 +25,7 @@ services:
       - observer
 
   core:
-    image: ghcr.io/ar-io/ar-io-core:${CORE_IMAGE_TAG:-7dc3908e2146d4497403c2ed20cea4fbba966c55}
+    image: ghcr.io/ar-io/ar-io-core:${CORE_IMAGE_TAG:-59e66be99e1f6b5df09b9117934fe49ff8124f38}
     build:
       context: .
     restart: on-failure
@@ -39,12 +39,14 @@ services:
       - ${DUCKDB_DATA_PATH:-./data/duckdb}:/app/data/duckdb
       - ${TEMP_DATA_PATH:-./data/tmp}:/app/data/tmp
       - ${LMDB_DATA_PATH:-./data/lmdb}:/app/data/lmdb
+      - ${PARQUET_DATA_PATH:-./data/parquet}:/app/data/parquet
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - LOG_LEVEL=${CORE_LOG_LEVEL:-info}
       - LOG_FORMAT=${LOG_FORMAT:-simple}
       - TRUSTED_NODE_URL=${TRUSTED_NODE_URL:-}
       - TRUSTED_GATEWAY_URL=https://${TRUSTED_GATEWAY_HOST:-arweave.net}
+      - TRUSTED_GATEWAYS_URLS=${TRUSTED_GATEWAYS_URLS:-}
       - START_HEIGHT=${START_HEIGHT:-}
       - STOP_HEIGHT=${STOP_HEIGHT:-}
       - SKIP_CACHE=${SKIP_CACHE:-}
@@ -80,15 +82,16 @@ services:
       - ARNS_CACHE_TTL_SECONDS=${ARNS_CACHE_TTL_SECONDS:-3600}
       - ARNS_CACHE_MAX_KEYS=${ARNS_CACHE_MAX_KEYS:-10000}
       - ARNS_CACHE_TYPE=${ARNS_CACHE_TYPE:-redis}
+      - ARNS_NAMES_CACHE_TTL_SECONDS=${ARNS_NAMES_CACHE_TTL_SECONDS:-}
       - ENABLE_MEMPOOL_WATCHER=${ENABLE_MEMPOOL_WATCHER:-false}
       - MEMPOOL_POOLING_INTERVAL_MS=${MEMPOOL_POOLING_INTERVAL_MS:-}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_REGION=${AWS_REGION:-}
       - AWS_ENDPOINT=${AWS_ENDPOINT:-}
-      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
-      - AWS_S3_PREFIX=${AWS_S3_PREFIX:-}
-      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-20}
+      - AWS_S3_CONTIGUOUS_DATA_BUCKET=${AWS_S3_CONTIGUOUS_DATA_BUCKET:-}
+      - AWS_S3_CONTIGUOUS_DATA_PREFIX=${AWS_S3_CONTIGUOUS_DATA_PREFIX:-}
+      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-22}
       - CHUNK_POST_URLS=${CHUNK_POST_URLS:-}
       - CHUNK_POST_RESPONSE_TIMEOUT_MS=${CHUNK_POST_RESPONSE_TIMEOUT_MS:-}
       - CHUNK_POST_ABORT_TIMEOUT_MS=${CHUNK_POST_ABORT_TIMEOUT_MS:-}
@@ -102,6 +105,10 @@ services:
       - MAX_DATA_ITEM_QUEUE_SIZE=${MAX_DATA_ITEM_QUEUE_SIZE:-}
       - TAG_SELECTIVITY=${TAG_SELECTIVITY:-}
       - MAX_EXPECTED_DATA_ITEM_INDEXING_INTERVAL_SECONDS=${MAX_EXPECTED_DATA_ITEM_INDEXING_INTERVAL_SECONDS:-}
+      - ENABLE_BACKGROUND_DATA_VERIFICATION=${ENABLE_BACKGROUND_DATA_VERIFICATION:-}
+      - BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS=${BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS:-}
+      - CLICKHOUSE_URL=${CLICKHOUSE_URL:-}
+      - BUNDLE_DATA_IMPORTER_QUEUE_SIZE=${BUNDLE_DATA_IMPORTER_QUEUE_SIZE:-}
     networks:
       - ar-io-network
     depends_on:
@@ -124,13 +131,42 @@ services:
     image: clickhouse/clickhouse-server:${CLICKHOUSE_IMAGE_TAG:-24}
     profiles:
       - clickhouse
+    ports:
+      - 8123:8123
+      - 8443:8443
+      - 9000:9000
     ulimits:
       nofile:
-        soft: '262144'
-        hard: '262144'
+        soft: 262144
+        hard: 262144
     volumes:
       - ${CLICKHOUSE_DATA_PATH:-./data/clickhouse}:/var/lib/clickhouse
       - ${CLICKHOUSE_LOGS_PATH:-./logs/clickhouse}:/var/log/clickhouse-server
+    networks:
+      - ar-io-network
+
+  clickhouse-auto-import:
+    image: ghcr.io/ar-io/ar-io-clickhouse-auto-import:${CLICKHOUSE_AUTO_IMPORT_IMAGE_TAG:-59e66be99e1f6b5df09b9117934fe49ff8124f38}
+    profiles:
+      - clickhouse
+    build:
+      context: .
+      dockerfile: Dockerfile.clickhouse-auto-import
+    restart: on-failure
+    volumes:
+      - ${PARQUET_DATA_PATH:-./data/parquet}:/app/data/parquet
+    environment:
+      - PARQUET_DATA_PATH=${PARQUET_DATA_PATH:-./data/parquet}
+      - CLICKHOUSE_HOST=clickhouse
+      - AR_IO_HOST=core
+      - AR_IO_PORT=4000
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - CLICKHOUSE_AUTO_IMPORT_SLEEP_INTERVAL=${CLICKHOUSE_AUTO_IMPORT_SLEEP_INTERVAL:-}
+    networks:
+      - ar-io-network
+    depends_on:
+      - core
+      - clickhouse
 
   observer:
     image: ghcr.io/ar-io/ar-io-observer:${OBSERVER_IMAGE_TAG:-c8d2ba1dbc8d1b4efd60c6ec041986fedbaa0d89}
@@ -151,7 +187,7 @@ services:
       - REPORT_GENERATION_INTERVAL_MS=${REPORT_GENERATION_INTERVAL_MS:-}
       - RUN_OBSERVER=${RUN_OBSERVER:-true}
       - MIN_RELEASE_NUMBER=${MIN_RELEASE_NUMBER:-0}
-      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-20}
+      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-22}
       - AO_CU_URL=${AO_CU_URL:-}
       - AO_MU_URL=${AO_MU_URL:-}
       - AO_GATEWAY_URL=${AO_GATEWAY_URL:-}

@@ -51,6 +51,30 @@ export const TRUSTED_GATEWAY_URL = env.varOrDefault(
   'https://arweave.net',
 );
 
+// Trusted gateway URLs (for retrieving contiguous data)
+export const TRUSTED_GATEWAYS_URLS = JSON.parse(
+  env.varOrDefault(
+    'TRUSTED_GATEWAYS_URLS',
+    JSON.stringify({
+      [TRUSTED_GATEWAY_URL]: 1,
+    }),
+  ),
+) as Record<string, number>;
+
+// Validate URLs and weights
+Object.entries(TRUSTED_GATEWAYS_URLS).forEach(([url, weight]) => {
+  try {
+    new URL(url);
+  } catch (error) {
+    throw new Error(`Invalid URL in TRUSTED_GATEWAYS_URLS: ${url}`);
+  }
+  if (typeof weight !== 'number' || weight <= 0) {
+    throw new Error(
+      `Invalid weight in TRUSTED_GATEWAYS_URLS for ${url}: ${weight}`,
+    );
+  }
+});
+
 // Trusted chunk POST URLs (for posting chunks received at /chunk)
 export const CHUNK_POST_URLS = env
   .varOrDefault('CHUNK_POST_URLS', `${TRUSTED_NODE_URL}/chunk`)
@@ -74,6 +98,11 @@ export const CHUNK_POST_ABORT_TIMEOUT_MS =
     ? +CHUNK_POST_ABORT_TIMEOUT_MS_STRING
     : undefined;
 
+export const CHUNK_POST_MIN_SUCCESS_COUNT = +env.varOrDefault(
+  'CHUNK_POST_MIN_SUCCESS_COUNT',
+  '3',
+);
+
 //
 // Data
 //
@@ -82,7 +111,7 @@ export const CHUNK_POST_ABORT_TIMEOUT_MS =
 export const ON_DEMAND_RETRIEVAL_ORDER = env
   .varOrDefault(
     'ON_DEMAND_RETRIEVAL_ORDER',
-    's3,trusted-gateway,chunks,tx-data',
+    's3,trusted-gateways,chunks,tx-data',
   )
   .split(',');
 
@@ -90,7 +119,7 @@ export const ON_DEMAND_RETRIEVAL_ORDER = env
 export const BACKGROUND_RETRIEVAL_ORDER = env
   .varOrDefault(
     'BACKGROUND_RETRIEVAL_ORDER',
-    'chunks,s3,trusted-gateway,tx-data',
+    'chunks,s3,trusted-gateways,tx-data',
   )
   .split(',');
 
@@ -167,6 +196,25 @@ export const ENABLE_DATA_DB_WAL_CLEANUP =
 export const MAX_DATA_ITEM_QUEUE_SIZE = +env.varOrDefault(
   'MAX_DATA_ITEM_QUEUE_SIZE',
   '100000',
+);
+
+// The maximum number of bundles to queue for unbundling before skipping
+export const BUNDLE_DATA_IMPORTER_QUEUE_SIZE = +env.varOrDefault(
+  'BUNDLE_DATA_IMPORTER_QUEUE_SIZE',
+  '1000',
+);
+
+//
+// Verification
+//
+
+// Whether or not to enable the background data verification worker
+export const ENABLE_BACKGROUND_DATA_VERIFICATION =
+  env.varOrDefault('ENABLE_BACKGROUND_DATA_VERIFICATION', 'false') === 'true';
+
+export const BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS = +env.varOrDefault(
+  'BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS',
+  '600', // 10 minutes
 );
 
 //
@@ -346,6 +394,11 @@ export const ARNS_ON_DEMAND_CIRCUIT_BREAKER_RESET_TIMEOUT_MS =
     `${5 * 60 * 1000}`, // 5 minutes
   );
 
+export const ARNS_NAMES_CACHE_TTL_SECONDS = +env.varOrDefault(
+  'ARNS_NAMES_CACHE_TTL_SECONDS',
+  `${5 * 60}`, // 5 minutes
+);
+
 // TODO: support multiple gateway urls
 export const TRUSTED_ARNS_GATEWAY_URL = env.varOrUndefined(
   'TRUSTED_ARNS_GATEWAY_URL',
@@ -373,8 +426,13 @@ export const AWS_SECRET_ACCESS_KEY = env.varOrUndefined(
 );
 export const AWS_REGION = env.varOrUndefined('AWS_REGION');
 export const AWS_ENDPOINT = env.varOrUndefined('AWS_ENDPOINT');
-export const AWS_S3_BUCKET = env.varOrUndefined('AWS_S3_BUCKET');
-export const AWS_S3_PREFIX = env.varOrUndefined('AWS_S3_PREFIX');
+
+export const AWS_S3_CONTIGUOUS_DATA_BUCKET = env.varOrUndefined(
+  'AWS_S3_CONTIGUOUS_DATA_BUCKET',
+);
+export const AWS_S3_CONTIGUOUS_DATA_PREFIX = env.varOrUndefined(
+  'AWS_S3_CONTIGUOUS_DATA_PREFIX',
+);
 
 //
 // Development and testing

@@ -49,7 +49,8 @@ import { currentUnixTimestamp } from '../lib/time.js';
 import log from '../log.js';
 import * as metrics from '../metrics.js';
 import {
-  BlockListValidator,
+  DataBlockListValidator,
+  NameBlockListValidator,
   BundleIndex,
   BundleRecord,
   ChainIndex,
@@ -371,6 +372,10 @@ type DebugInfo = {
     maxStable: number;
     minNew: number;
     maxNew: number;
+    minStableDataItem: number;
+    maxStableDataItem: number;
+    minNewDataItem: number;
+    maxNewDataItem: number;
   };
   timestamps: {
     now: number;
@@ -448,6 +453,7 @@ export class StandaloneSqliteDatabaseWorker {
     }
 
     this.dbs.core.exec(`ATTACH DATABASE '${bundlesDbPath}' AS bundles`);
+    this.dbs.data.exec(`ATTACH DATABASE '${bundlesDbPath}' AS bundles`);
     this.dbs.bundles.exec(`ATTACH DATABASE '${coreDbPath}' AS core`);
 
     this.stmts = { core: {}, data: {}, moderation: {}, bundles: {} };
@@ -1130,6 +1136,10 @@ export class StandaloneSqliteDatabaseWorker {
         maxStable: chainStats.stable_blocks_max_height ?? -1,
         minNew: chainStats.new_blocks_min_height ?? -1,
         maxNew: chainStats.new_blocks_max_height ?? -1,
+        minStableDataItem: dataItemStats.min_stable_height ?? -1,
+        maxStableDataItem: dataItemStats.max_stable_height ?? -1,
+        minNewDataItem: dataItemStats.min_new_height ?? -1,
+        maxNewDataItem: dataItemStats.max_new_height ?? -1,
       },
       timestamps: {
         now: currentUnixTimestamp(),
@@ -2317,6 +2327,22 @@ export class StandaloneSqliteDatabaseWorker {
     return false;
   }
 
+  isNameBlocked(name: string): boolean {
+    if (name.length > 0) {
+      const row = this.stmts.moderation.isNameBlocked.get({
+        name,
+      });
+      return row?.is_blocked === 1;
+    }
+    return false;
+  }
+
+  getBlockedNames(): string[] {
+    return this.stmts.moderation.selectBlockedNames
+      .all()
+      .map((row) => row.name);
+  }
+
   blockData({
     id,
     hash,
@@ -2353,6 +2379,37 @@ export class StandaloneSqliteDatabaseWorker {
         blocked_at: currentUnixTimestamp(),
       });
     }
+  }
+
+  blockName({
+    name,
+    source,
+    notes,
+  }: {
+    name: string;
+    source?: string;
+    notes?: string;
+  }) {
+    let sourceId = undefined;
+    if (source !== undefined) {
+      this.stmts.moderation.insertSource.run({
+        name: source,
+      });
+      sourceId = this.stmts.moderation.getSourceByName.get({
+        name: source,
+      })?.id;
+    }
+
+    this.stmts.moderation.insertBlockedName.run({
+      name,
+      block_source_id: sourceId,
+      notes,
+      blocked_at: currentUnixTimestamp(),
+    });
+  }
+
+  unblockName({ name }: { name: string }) {
+    this.stmts.moderation.deleteBlockedName.run({ name });
   }
 
   async saveNestedDataId({
@@ -2392,10 +2449,37 @@ export class StandaloneSqliteDatabaseWorker {
     });
   }
 
+  getUnverifiedDataIds() {
+    const dataIds = this.stmts.data.selectUnverifiedContiguousDataIds.all();
+    return dataIds.map((row) => toB64Url(row.id));
+  }
+
+  getRootTxId(id: string) {
+    const row = this.stmts.core.selectRootTxId.get({ id: fromB64Url(id) });
+    if (row.root_transaction_id) {
+      return toB64Url(row.root_transaction_id);
+    }
+
+    return;
+  }
+
+  async saveVerificationStatus(id: string) {
+    this.stmts.data.updateDataItemVerificationStatus.run({
+      id: fromB64Url(id),
+      verified_at: currentUnixTimestamp(),
+    });
+  }
+
   cleanupWal(dbName: 'core' | 'bundles' | 'data' | 'moderation') {
     const walCheckpoint = this.dbs[dbName].pragma('wal_checkpoint(TRUNCATE)');
 
     return walCheckpoint[0];
+  }
+
+  pruneStableDataItems(indexedAtThreshold: number) {
+    this.stmts.bundles.deleteStableDataItemsLessThanIndexedAt.run({
+      indexed_at_threshold: indexedAtThreshold,
+    });
   }
 }
 
@@ -2435,7 +2519,8 @@ const WORKER_POOL_SIZES: WorkerPoolSizes = {
 export class StandaloneSqliteDatabase
   implements
     BundleIndex,
-    BlockListValidator,
+    DataBlockListValidator,
+    NameBlockListValidator,
     ChainIndex,
     ChainOffsetIndex,
     ContiguousDataIndex,
@@ -2988,6 +3073,14 @@ export class StandaloneSqliteDatabase
     return this.queueRead('moderation', 'isHashBlocked', [hash]);
   }
 
+  async isNameBlocked(name: string): Promise<boolean> {
+    return this.queueRead('moderation', 'isNameBlocked', [name]);
+  }
+
+  async getBlockedNames(): Promise<string[]> {
+    return this.queueRead('moderation', 'getBlockedNames', undefined);
+  }
+
   async blockData({
     id,
     hash,
@@ -3007,6 +3100,28 @@ export class StandaloneSqliteDatabase
         notes,
       },
     ]);
+  }
+
+  async blockName({
+    name,
+    source,
+    notes,
+  }: {
+    name: string;
+    source?: string;
+    notes?: string;
+  }): Promise<void> {
+    return this.queueWrite('moderation', 'blockName', [
+      {
+        name,
+        source,
+        notes,
+      },
+    ]);
+  }
+
+  async unblockName({ name }: { name: string }): Promise<void> {
+    return this.queueWrite('moderation', 'unblockName', [{ name }]);
   }
 
   async saveNestedDataId({
@@ -3045,6 +3160,24 @@ export class StandaloneSqliteDatabase
         parentId,
         dataOffset,
       },
+    ]);
+  }
+
+  async getUnverifiedDataIds() {
+    return this.queueRead('data', 'getUnverifiedDataIds', undefined);
+  }
+
+  async getRootTxId(id: string) {
+    return this.queueRead('core', 'getRootTxId', [id]);
+  }
+
+  async saveVerificationStatus(id: string) {
+    return this.queueWrite('data', 'saveVerificationStatus', [id]);
+  }
+
+  async pruneStableDataItems(indexedAtThreshold: number): Promise<void> {
+    return this.queueWrite('bundles', 'pruneStableDataItems', [
+      indexedAtThreshold,
     ]);
   }
 
@@ -3209,8 +3342,24 @@ if (!isMainThread) {
           const isHashBlocked = worker.isHashBlocked(args[0]);
           parentPort?.postMessage(isHashBlocked);
           break;
+        case 'isNameBlocked':
+          const isNameBlocked = worker.isNameBlocked(args[0]);
+          parentPort?.postMessage(isNameBlocked);
+          break;
+        case 'getBlockedNames':
+          const blockedNames = worker.getBlockedNames();
+          parentPort?.postMessage(blockedNames);
+          break;
         case 'blockData':
           worker.blockData(args[0]);
+          parentPort?.postMessage(null);
+          break;
+        case 'blockName':
+          worker.blockName(args[0]);
+          parentPort?.postMessage(null);
+          break;
+        case 'unblockName':
+          worker.unblockName(args[0]);
           parentPort?.postMessage(null);
           break;
         case 'saveNestedDataId':
@@ -3219,6 +3368,22 @@ if (!isMainThread) {
           break;
         case 'saveNestedDataHash':
           worker.saveNestedDataHash(args[0]);
+          parentPort?.postMessage(null);
+          break;
+        case 'getUnverifiedDataIds':
+          const unverifiedIds = worker.getUnverifiedDataIds();
+          parentPort?.postMessage(unverifiedIds);
+          break;
+        case 'getRootTxId':
+          const rootTxId = worker.getRootTxId(args[0]);
+          parentPort?.postMessage(rootTxId);
+          break;
+        case 'saveVerificationStatus':
+          worker.saveVerificationStatus(args[0]);
+          parentPort?.postMessage(null);
+          break;
+        case 'pruneStableDataItems':
+          worker.pruneStableDataItems(args[0]);
           parentPort?.postMessage(null);
           break;
         case 'cleanupWal':

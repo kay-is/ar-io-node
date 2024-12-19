@@ -19,14 +19,15 @@ import { Router, default as express } from 'express';
 
 import log from '../log.js';
 import * as system from '../system.js';
+import * as metrics from '../metrics.js';
 import {
   CHUNK_POST_URLS,
   CHUNK_POST_ABORT_TIMEOUT_MS,
   CHUNK_POST_RESPONSE_TIMEOUT_MS,
+  CHUNK_POST_MIN_SUCCESS_COUNT,
 } from '../config.js';
 import { headerNames } from '../constants.js';
 
-const MIN_SUCCESS_COUNT = 3;
 const MAX_CHUNK_SIZE = 1024 * 256 * 1.4; // 256KiB + 40% overhead for b64u encoding
 
 export const arweaveRouter = Router();
@@ -52,10 +53,13 @@ arweaveRouter.post('/chunk', async (req, res) => {
     });
 
     if (
-      result.successCount >= Math.min(MIN_SUCCESS_COUNT, CHUNK_POST_URLS.length)
+      result.successCount >=
+      Math.min(CHUNK_POST_MIN_SUCCESS_COUNT, CHUNK_POST_URLS.length)
     ) {
+      metrics.arweaveChunkBroadcastCounter.inc({ status: 'success' });
       res.status(200).send(result);
     } else {
+      metrics.arweaveChunkBroadcastCounter.inc({ status: 'fail' });
       res.status(500).send(result);
     }
   } catch (error: any) {

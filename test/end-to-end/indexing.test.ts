@@ -42,6 +42,8 @@ const composeUp = async ({
   ANS104_UNBUNDLE_FILTER = '{"always": true}',
   ANS104_INDEX_FILTER = '{"always": true}',
   ADMIN_API_KEY = 'secret',
+  TRUSTED_GATEWAYS_URLS = '{"https://arweave.net": 1, "https://ar-io.dev": 2}',
+  BACKGROUND_RETRIEVAL_ORDER = 'trusted-gateways',
   ...ENVIRONMENT
 }: Environment = {}) => {
   await cleanDb();
@@ -53,6 +55,8 @@ const composeUp = async ({
       ANS104_UNBUNDLE_FILTER,
       ANS104_INDEX_FILTER,
       ADMIN_API_KEY,
+      TRUSTED_GATEWAYS_URLS,
+      BACKGROUND_RETRIEVAL_ORDER,
       ...ENVIRONMENT,
     })
     .withBuild()
@@ -836,6 +840,69 @@ describe('Indexing', function () {
         assert.equal(dataItem.tag_count, 2);
         assert.equal(dataItem.content_type, 'application/octet-stream');
       });
+    });
+  });
+
+  describe('Background data verification', function () {
+    let dataDb: Database;
+    let compose: StartedDockerComposeEnvironment;
+
+    const waitForIndexing = async () => {
+      const getAll = () =>
+        dataDb.prepare('SELECT * FROM contiguous_data_ids').all();
+
+      while (getAll().length === 0) {
+        console.log('Waiting for data items to be indexed...');
+        await wait(5000);
+      }
+    };
+
+    const waitVerification = async () => {
+      const getAll = () =>
+        dataDb.prepare('SELECT verified FROM contiguous_data_ids').all();
+
+      while (getAll().some((row) => row.verified === 0)) {
+        console.log('Waiting for data items to be verified...');
+
+        await wait(5000);
+      }
+    };
+
+    before(async function () {
+      compose = await composeUp({
+        ENABLE_BACKGROUND_DATA_VERIFICATION: 'true',
+        BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS: '10',
+        BACKGROUND_RETRIEVAL_ORDER: 'trusted-gateways',
+      });
+      dataDb = new Sqlite(`${projectRootPath}/data/sqlite/data.db`);
+
+      await axios.post(
+        'http://localhost:4000/ar-io/admin/queue-bundle',
+        {
+          id: '-H3KW7RKTXMg5Miq2jHx36OHSVsXBSYuE2kxgsFj6OQ',
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer secret',
+          },
+        },
+      );
+
+      await waitForIndexing();
+      await waitVerification();
+    });
+
+    after(async function () {
+      await compose.down();
+    });
+
+    it('should verify unverified data', async () => {
+      const stmt = dataDb.prepare('SELECT verified FROM contiguous_data_ids');
+      const rows = stmt.all();
+
+      assert.equal(rows.length, 79);
+      assert.ok(rows.every((row) => row.verified === 1));
     });
   });
 

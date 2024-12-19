@@ -24,9 +24,11 @@ import { sendNotFound } from '../routes/data/handlers.js';
 import { DATA_PATH_REGEX } from '../constants.js';
 import { NameResolution, NameResolver } from '../types.js';
 import * as metrics from '../metrics.js';
+import * as system from '../system.js';
 import NodeCache from 'node-cache';
 
 const EXCLUDED_SUBDOMAINS = new Set('www');
+const MAX_ARNS_NAME_LENGTH = 51;
 
 // simple cache that stores the arns resolution promises to avoid duplicate requests to the name resolver
 const arnsRequestCache = new NodeCache({
@@ -58,14 +60,16 @@ export const createArnsMiddleware = ({
       next();
       return;
     }
+
     const arnsSubdomain = req.subdomains[req.subdomains.length - 1];
+
     if (
       EXCLUDED_SUBDOMAINS.has(arnsSubdomain) ||
       // Avoid collisions with sandbox URLs by ensuring the subdomain length
       // is below the minimum length of a sandbox subdomain. Undernames are
       // are an exception because they can be longer and '_' cannot appear in
       // base32.
-      (arnsSubdomain.length > 48 && !arnsSubdomain.match(/_/))
+      (arnsSubdomain.length > MAX_ARNS_NAME_LENGTH && !arnsSubdomain.match(/_/))
     ) {
       next();
       return;
@@ -73,6 +77,11 @@ export const createArnsMiddleware = ({
 
     if (DATA_PATH_REGEX.test(req.path)) {
       next();
+      return;
+    }
+
+    if (system.blockedNamesCache.isBlocked(arnsSubdomain)) {
+      sendNotFound(res);
       return;
     }
 

@@ -403,9 +403,14 @@ export interface GqlQueryable {
   }): Promise<GqlBlocksResult>;
 }
 
-export interface BlockListValidator {
+export interface DataBlockListValidator {
   isIdBlocked(id: string | undefined): Promise<boolean>;
   isHashBlocked(hash: string | undefined): Promise<boolean>;
+}
+
+export interface NameBlockListValidator {
+  isNameBlocked(name: string): Promise<boolean>;
+  getBlockedNames(): Promise<string[]>;
 }
 
 export interface JsonChunk {
@@ -562,6 +567,9 @@ export interface ContiguousDataIndex {
     cachedAt?: number;
     verified?: boolean;
   }): Promise<void>;
+  getUnverifiedDataIds(): Promise<string[]>;
+  getRootTxId(id: string): Promise<string | undefined>;
+  saveVerificationStatus(id: string): Promise<void>;
 }
 
 export interface ContiguousDataSource {

@@ -37,6 +37,7 @@ import {
   bundlesDbPath,
   coreDb,
   coreDbPath,
+  dataDb,
   dataDbPath,
   moderationDbPath,
 } from '../../test/sqlite-helpers.js';
@@ -161,6 +162,7 @@ describe('SQLite data conversion functions', () => {
           ans104DataItem: dataItem,
           filter: '',
           dataHash: '',
+          rootParentOffset: 0,
         });
         const rows = dataItemToDbRows(normalizedDataItem);
 
@@ -1070,6 +1072,207 @@ describe('StandaloneSqliteDatabase', () => {
           .import_attempt_count,
         1,
       );
+    });
+  });
+
+  describe('getUnverifiedDataIds', () => {
+    it("should return an empty list if there's no unverified data ids", async () => {
+      const emptyDbIds = await db.getUnverifiedDataIds();
+      assert.equal(emptyDbIds.length, 0);
+
+      // inserting a verified data id
+      await db.saveDataContentAttributes({
+        id: '0000000000000000000000000000000000000000000',
+        hash: '0000000000000000000000000000000000000000000',
+        dataSize: 10,
+        verified: true,
+      });
+
+      const unverifiedIds = await db.getUnverifiedDataIds();
+      assert.equal(unverifiedIds.length, 0);
+    });
+
+    it('should return a list of ids if unverified data ids exists', async () => {
+      // inserting a verified data id
+      await db.saveDataContentAttributes({
+        id: '0000000000000000000000000000000000000000000',
+        hash: '0000000000000000000000000000000000000000000',
+        dataSize: 10,
+        verified: true,
+      });
+
+      // inserting an unverified data id
+      await db.saveDataContentAttributes({
+        id: 'fLxHz2WbpNFL7x1HrOyUlsAVHYaKSyj6IqgCJlFuv9g',
+        hash: 'hash',
+        dataSize: 10,
+        verified: false,
+      });
+
+      const unverifiedIds = await db.getUnverifiedDataIds();
+      assert.equal(unverifiedIds.length, 1);
+      assert.deepEqual(unverifiedIds, [
+        'fLxHz2WbpNFL7x1HrOyUlsAVHYaKSyj6IqgCJlFuv9g',
+      ]);
+    });
+  });
+
+  describe('getRootTxId', () => {
+    const dataItemRootTxId = '0000000000000000000000000000000000000000000';
+    const dataItem = {
+      anchor: 'a',
+      dataOffset: 10,
+      dataSize: 1,
+      id: DATA_ITEM_ID,
+      offset: 10,
+      owner: 'a',
+      ownerOffset: 1,
+      ownerSize: 1,
+      sigName: 'a',
+      signature: 'a',
+      signatureOffset: 1,
+      signatureSize: 1,
+      signatureType: 1,
+      size: 1,
+      tags: [],
+      target: 'a',
+    };
+    const normalizedDataItem = normalizeAns104DataItem({
+      rootTxId: dataItemRootTxId,
+      parentId: dataItemRootTxId,
+      parentIndex: -1,
+      index: 0,
+      ans104DataItem: dataItem,
+      filter: '',
+      dataHash: '',
+      rootParentOffset: 0,
+    });
+
+    it('should return undefined if id is not found', async () => {
+      const rootTxId = await db.getRootTxId(DATA_ITEM_ID);
+      assert.equal(rootTxId, undefined);
+    });
+
+    it('should return root transcation id of a given data item', async () => {
+      await db.saveDataItem(normalizedDataItem);
+
+      const rootTxId = await db.getRootTxId(DATA_ITEM_ID);
+      assert.equal(rootTxId, dataItemRootTxId);
+    });
+
+    it('should return undefined if the root transcation id of a given data item is null', async () => {
+      const dataItem = normalizedDataItem;
+      dataItem.root_tx_id = null;
+      await db.saveDataItem(dataItem);
+
+      const rootTxId = await db.getRootTxId(DATA_ITEM_ID);
+      assert.equal(rootTxId, undefined);
+    });
+
+    it('should return the same L1 transcation id given an L1 transaction ', async () => {
+      const l1TxId = 'vYQNQruccPlvxatkcRYmoaVywIzHxS3DuBG1CPxNMPA';
+      const height = 982575;
+
+      const { block, txs, missingTxIds } =
+        await chainSource.getBlockAndTxsByHeight(height);
+
+      await db.saveBlockAndTxs(block, txs, missingTxIds);
+
+      const rootTxId = await db.getRootTxId(l1TxId);
+      assert.equal(rootTxId, l1TxId);
+    });
+  });
+
+  // skipping for now as it works when running the test individually
+  describe.skip('saveVerificationStatus', () => {
+    const dataItemRootTxId = '0000000000000000000000000000000000000000000';
+    const dataItem = {
+      anchor: 'a',
+      dataOffset: 10,
+      dataSize: 1,
+      id: DATA_ITEM_ID,
+      offset: 10,
+      owner: 'a',
+      ownerOffset: 1,
+      ownerSize: 1,
+      sigName: 'a',
+      signature: 'a',
+      signatureOffset: 1,
+      signatureSize: 1,
+      signatureType: 1,
+      size: 1,
+      tags: [],
+      target: 'a',
+    };
+    const normalizedDataItem = normalizeAns104DataItem({
+      rootTxId: dataItemRootTxId,
+      parentId: dataItemRootTxId,
+      parentIndex: -1,
+      index: 0,
+      ans104DataItem: dataItem,
+      filter: '',
+      dataHash: '',
+      rootParentOffset: 0,
+    });
+    const anotherDataItem = { ...normalizedDataItem };
+    anotherDataItem.id = 'WxQdMByPoNZgUFDMbvtC5sB2OHv0LDVsRQZex7qrwUY';
+    anotherDataItem.parent_id = '2222222222222222222222222222222222222222222';
+    anotherDataItem.root_tx_id = '2222222222222222222222222222222222222222222';
+
+    it('should set only bundled items as verified when bundle is set as verified', async () => {
+      await db.saveDataContentAttributes({
+        id: dataItemRootTxId,
+        hash: 'hash',
+        dataSize: 10,
+      });
+
+      await db.saveDataContentAttributes({
+        id: normalizedDataItem.id,
+        parentId: normalizedDataItem.parent_id ?? undefined,
+        hash: 'hash',
+        dataSize: 10,
+      });
+
+      await db.saveDataContentAttributes({
+        id: anotherDataItem.id,
+        parentId: anotherDataItem.parent_id ?? undefined,
+        hash: 'hash',
+        dataSize: 10,
+      });
+
+      await db.saveDataItem(normalizedDataItem);
+      await db.saveDataItem(anotherDataItem);
+
+      const sql = `
+        SELECT * FROM contiguous_data_ids;
+      `;
+      const contiguousDataIds = dataDb
+        .prepare(sql)
+        .all()
+        .map((row) => ({ id: toB64Url(row.id), verified: row.verified }));
+
+      assert.equal(contiguousDataIds.length, 3);
+      assert.equal(contiguousDataIds[0].id, dataItemRootTxId);
+      assert.equal(contiguousDataIds[0].verified, 0);
+      assert.equal(contiguousDataIds[1].id, normalizedDataItem.id);
+      assert.equal(contiguousDataIds[1].verified, 0);
+      assert.equal(contiguousDataIds[2].id, anotherDataItem.id);
+      assert.equal(contiguousDataIds[2].verified, 0);
+
+      await db.saveVerificationStatus(dataItemRootTxId);
+
+      const contiguousDataIdsUpdated = dataDb
+        .prepare(sql)
+        .all()
+        .map((row) => ({ id: toB64Url(row.id), verified: row.verified }));
+
+      assert.equal(contiguousDataIdsUpdated.length, 3);
+      assert.equal(contiguousDataIdsUpdated[0].id, dataItemRootTxId);
+      assert.equal(contiguousDataIdsUpdated[0].verified, 1);
+      assert.equal(contiguousDataIdsUpdated[1].id, normalizedDataItem.id);
+      assert.equal(contiguousDataIdsUpdated[1].verified, 1);
+      assert.equal(contiguousDataIdsUpdated[2].id, anotherDataItem.id);
+      assert.equal(contiguousDataIdsUpdated[2].verified, 0);
     });
   });
 

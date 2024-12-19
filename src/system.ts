@@ -24,7 +24,7 @@ import awsLiteS3 from '@aws-lite/s3';
 
 import { ArweaveCompositeClient } from './arweave/composite-client.js';
 import * as config from './config.js';
-import { GatewayDataSource } from './data/gateway-data-source.js';
+import { GatewaysDataSource } from './data/gateways-data-source.js';
 import { ReadThroughChunkDataCache } from './data/read-through-chunk-data-cache.js';
 import { ReadThroughDataCache } from './data/read-through-data-cache.js';
 import { SequentialDataSource } from './data/sequential-data-source.js';
@@ -47,7 +47,8 @@ import { StreamingManifestPathResolver } from './resolution/streaming-manifest-p
 import { FsChunkDataStore } from './store/fs-chunk-data-store.js';
 import { FsDataStore } from './store/fs-data-store.js';
 import {
-  BlockListValidator,
+  DataBlockListValidator,
+  NameBlockListValidator,
   BundleIndex,
   ChainIndex,
   ChainOffsetIndex,
@@ -74,6 +75,7 @@ import { TransactionOffsetRepairWorker } from './workers/transaction-offset-repa
 import { WebhookEmitter } from './workers/webhook-emitter.js';
 import { createArNSKvStore, createArNSResolver } from './init/resolvers.js';
 import { MempoolWatcher } from './workers/mempool-watcher.js';
+import { DataVerificationWorker } from './workers/data-verification.js';
 import { ArIODataSource } from './data/ar-io-data-source.js';
 import { S3DataSource } from './data/s3-data-source.js';
 import { connect } from '@permaweb/aoconnect';
@@ -83,6 +85,8 @@ import { SQLiteWalCleanupWorker } from './workers/sqlite-wal-cleanup-worker.js';
 import { KvArnsStore } from './store/kv-arns-store.js';
 import { parquetExporter } from './routes/ar-io.js';
 import { server } from './app.js';
+import { S3DataStore } from './store/s3-data-store.js';
+import { BlockedNamesCache } from './blocked-names-cache.js';
 
 process.on('uncaughtException', (error) => {
   metrics.uncaughtExceptionCounter.inc();
@@ -154,7 +158,8 @@ export const chainIndex: ChainIndex = db;
 export const chainOffsetIndex: ChainOffsetIndex = db;
 export const bundleIndex: BundleIndex = db;
 export const contiguousDataIndex: ContiguousDataIndex = db;
-export const blockListValidator: BlockListValidator = db;
+export const dataBlockListValidator: DataBlockListValidator = db;
+export const nameBlockListValidator: NameBlockListValidator = db;
 export const nestedDataIndexWriter: NestedDataIndexWriter = db;
 export const dataItemIndexWriter: DataItemIndexWriter = db;
 export const gqlQueryable: GqlQueryable = (() => {
@@ -329,9 +334,9 @@ const txChunksDataSource = new TxChunksDataSource({
   chunkSource: chunkDataSource,
 });
 
-const gatewayDataSource = new GatewayDataSource({
+const gatewaysDataSource = new GatewaysDataSource({
   log,
-  trustedGatewayUrl: config.TRUSTED_GATEWAY_URL,
+  trustedGatewaysUrls: config.TRUSTED_GATEWAYS_URLS,
 });
 
 const arIODataSource = new ArIODataSource({
@@ -341,12 +346,12 @@ const arIODataSource = new ArIODataSource({
 });
 
 const s3DataSource =
-  awsClient !== undefined && config.AWS_S3_BUCKET !== undefined
+  awsClient !== undefined && config.AWS_S3_CONTIGUOUS_DATA_BUCKET !== undefined
     ? new S3DataSource({
         log,
         s3Client: awsClient.S3,
-        s3Bucket: config.AWS_S3_BUCKET,
-        s3Prefix: config.AWS_S3_PREFIX,
+        s3Bucket: config.AWS_S3_CONTIGUOUS_DATA_BUCKET,
+        s3Prefix: config.AWS_S3_CONTIGUOUS_DATA_PREFIX,
         awsClient,
       })
     : undefined;
@@ -357,8 +362,8 @@ function getDataSource(sourceName: string): ContiguousDataSource | undefined {
       return s3DataSource;
     case 'ario-peer':
       return arIODataSource;
-    case 'trusted-gateway':
-      return gatewayDataSource;
+    case 'trusted-gateways':
+      return gatewaysDataSource;
     case 'chunks':
       return txChunksDataSource;
     case 'tx-data':
@@ -392,10 +397,19 @@ metrics.registerQueueLengthGauge('dataContentAttributeImporter', {
   length: () => dataContentAttributeImporter.queueDepth(),
 });
 
-const contiguousDataStore = new FsDataStore({
-  log,
-  baseDir: 'data/contiguous',
-});
+const contiguousDataStore =
+  awsClient !== undefined && config.AWS_S3_CONTIGUOUS_DATA_BUCKET !== undefined
+    ? new S3DataStore({
+        log,
+        baseDir: 'data/contiguous',
+        s3Client: awsClient.S3,
+        s3Prefix: config.AWS_S3_CONTIGUOUS_DATA_PREFIX,
+        s3Bucket: config.AWS_S3_CONTIGUOUS_DATA_BUCKET,
+      })
+    : new FsDataStore({
+        log,
+        baseDir: 'data/contiguous',
+      });
 
 export const onDemandContiguousDataSource = new ReadThroughDataCache({
   log,
@@ -455,11 +469,12 @@ metrics.registerQueueLengthGauge('ans104Unbundler', {
   length: () => ans104Unbundler.queueDepth(),
 });
 
-const bundleDataImporter = new BundleDataImporter({
+export const bundleDataImporter = new BundleDataImporter({
   log,
   contiguousDataSource: backgroundContiguousDataSource,
   ans104Unbundler,
   workerCount: config.ANS104_DOWNLOAD_WORKERS,
+  maxQueueSize: config.BUNDLE_DATA_IMPORTER_QUEUE_SIZE,
 });
 metrics.registerQueueLengthGauge('bundleDataImporter', {
   length: () => bundleDataImporter.queueDepth(),
@@ -468,6 +483,7 @@ metrics.registerQueueLengthGauge('bundleDataImporter', {
 async function queueBundle(
   item: NormalizedDataItem | PartialJsonTransaction,
   isPrioritized = false,
+  bypassFilter = false,
 ) {
   try {
     if ('root_tx_id' in item && item.root_tx_id === null) {
@@ -485,7 +501,7 @@ async function queueBundle(
       format: 'ans-104',
     });
 
-    if (await config.ANS104_UNBUNDLE_FILTER.match(item)) {
+    if (bypassFilter || (await config.ANS104_UNBUNDLE_FILTER.match(item))) {
       metrics.bundlesMatchedCounter.inc({ bundle_format: 'ans-104' });
       await db.saveBundle({
         id: item.id,
@@ -525,7 +541,7 @@ async function queueBundle(
 eventEmitter.on(
   events.ANS104_BUNDLE_QUEUED,
   async (item: NormalizedDataItem | PartialJsonTransaction) => {
-    await queueBundle(item, true);
+    await queueBundle(item, true, true);
   },
 );
 
@@ -641,6 +657,25 @@ if (dataSqliteWalCleanupWorker !== undefined) {
   dataSqliteWalCleanupWorker.start();
 }
 
+const dataVerificationWorker = config.ENABLE_BACKGROUND_DATA_VERIFICATION
+  ? new DataVerificationWorker({
+      log,
+      contiguousDataIndex,
+      contiguousDataSource: gatewaysDataSource,
+    })
+  : undefined;
+
+if (dataVerificationWorker !== undefined) {
+  dataVerificationWorker.start();
+}
+
+export const blockedNamesCache = new BlockedNamesCache({
+  log,
+  cacheTTL: 3600,
+  fetchInterval: 3600000,
+  fetchBlockedNames: () => nameBlockListValidator.getBlockedNames(),
+});
+
 let isShuttingDown = false;
 
 export const shutdown = async (exitCode = 0) => {
@@ -672,6 +707,7 @@ export const shutdown = async (exitCode = 0) => {
       await db.stop();
       await headerFsCacheCleanupWorker?.stop();
       await contiguousDataFsCacheCleanupWorker?.stop();
+      await dataVerificationWorker?.stop();
 
       process.exit(exitCode);
     });

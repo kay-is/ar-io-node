@@ -23,7 +23,7 @@ import * as system from '../system.js';
 import * as events from '../events.js';
 import * as metrics from '../metrics.js';
 import { release } from '../version.js';
-import { signatureStore } from '../system.js';
+import { db, signatureStore } from '../system.js';
 import log from '../log.js';
 import { ParquetExporter } from '../workers/parquet-exporter.js';
 
@@ -133,6 +133,54 @@ arIoRouter.put('/ar-io/admin/block-data', express.json(), async (req, res) => {
   }
 });
 
+// Block resolution of ArNS name
+arIoRouter.put('/ar-io/admin/block-name', express.json(), async (req, res) => {
+  try {
+    const { name, source, notes } = req.body;
+    if (typeof name !== 'string' || name.trim() === '') {
+      res.status(400).send("'name' must be a non-empty string");
+      return;
+    }
+    if (name.length > 51) {
+      res.status(400).send("'name' exceeds maximum length");
+      return;
+    }
+
+    await system.db.blockName({ name, source, notes });
+    system.blockedNamesCache.addName(name);
+
+    res.json({ message: 'Name blocked' });
+  } catch (error: any) {
+    res.status(500).send(error?.message);
+  }
+});
+
+// Unblock resolution of ArNS name
+arIoRouter.put(
+  '/ar-io/admin/unblock-name',
+  express.json(),
+  async (req, res) => {
+    try {
+      const { name } = req.body;
+      if (typeof name !== 'string' || name.trim() === '') {
+        res.status(400).send("'name' must be a non-empty string");
+        return;
+      }
+      if (name.length > 51) {
+        res.status(400).send("'name' exceeds maximum length");
+        return;
+      }
+
+      await system.db.unblockName({ name });
+      system.blockedNamesCache.removeName(name);
+
+      res.json({ message: 'Name unblocked' });
+    } catch (error: any) {
+      res.status(500).send(error?.message);
+    }
+  },
+);
+
 // Queue a TX ID for processing
 arIoRouter.post('/ar-io/admin/queue-tx', express.json(), async (req, res) => {
   try {
@@ -159,6 +207,11 @@ arIoRouter.post(
 
       if (id === undefined) {
         res.status(400).send("Must provide 'id'");
+        return;
+      }
+
+      if (await system.bundleDataImporter.isQueueFull()) {
+        res.status(429).send('Bundle importer queue is full');
         return;
       }
 
@@ -307,6 +360,29 @@ arIoRouter.get(
       const status = exporter.status();
 
       res.json(status);
+    } catch (error: any) {
+      res.status(500).send(error?.message);
+    }
+  },
+);
+
+// Prune stable data items before a given timestamp
+arIoRouter.post(
+  '/ar-io/admin/prune-stable-data-items',
+  express.json(),
+  async (req, res) => {
+    try {
+      const { indexedAtThreshold } = req.body;
+
+      if (!Number.isInteger(indexedAtThreshold) || indexedAtThreshold < 0) {
+        res
+          .status(400)
+          .send('Invalid indexedAtThreshold - must be a positive integer');
+        return;
+      }
+
+      await db.pruneStableDataItems(indexedAtThreshold);
+      res.json({ message: 'Stable data items pruned successfully' });
     } catch (error: any) {
       res.status(500).send(error?.message);
     }
