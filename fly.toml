@@ -7,7 +7,7 @@ app = "ar-io-node"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-core:7dc3908e2146d4497403c2ed20cea4fbba966c55"
+  image = "ghcr.io/ar-io/ar-io-core:59e66be99e1f6b5df09b9117934fe49ff8124f38"
   
 [env]
   ARNS_ROOT_HOST="arweave.fllstck.dev"
@@ -23,6 +23,7 @@ primary_region = "ams"
   ARNS_RESOLVER_PRIORITY_ORDER="on-demand,gateway"
   ARNS_CACHE_TTL_SECONDS="3600"
   ARNS_CACHE_MAX_KEYS="10000"
+  ARNS_NAMES_CACHE_TTL_SECONDS="300"
   ENABLE_MEMPOOL_WATCHER="false"
   CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD="86400" # older than a day
   RUN_RESOLVER="true"
