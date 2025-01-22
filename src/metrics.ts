@@ -47,7 +47,7 @@ export const uncaughtExceptionCounter = new promClient.Counter({
 export const bundlesCounter = new promClient.Counter({
   name: 'bundles_total',
   help: 'Count of all bundles seen',
-  labelNames: ['bundle_format', 'parent_type'],
+  labelNames: ['bundle_format', 'contiguous_data_type'],
 });
 
 export const bundlesMatchedCounter = new promClient.Counter({
@@ -68,6 +68,12 @@ export const bundlesUnbundledCounter = new promClient.Counter({
   labelNames: ['bundle_format'],
 });
 
+export const dataItemsUnbundledCounter = new promClient.Counter({
+  name: 'data_items_unbundled_total',
+  help: 'Count of data items unbundled for potential indexing',
+  labelNames: ['bundle_format'],
+});
+
 export const dataItemsQueuedCounter = new promClient.Counter({
   name: 'data_items_queued_total',
   help: 'Count of data items queued for indexing',
@@ -77,11 +83,13 @@ export const dataItemsQueuedCounter = new promClient.Counter({
 export const dataItemsIndexedCounter = new promClient.Counter({
   name: 'data_items_indexed_total',
   help: 'Count of data items indexed',
+  labelNames: ['parent_type'],
 });
 
 export const dataItemDataIndexedCounter = new promClient.Counter({
   name: 'data_item_data_indexed_total',
   help: 'Count of data item data indexed',
+  labelNames: ['parent_type'],
 });
 
 export const dataItemLastIndexedTimestampSeconds = new promClient.Gauge({
@@ -123,7 +131,7 @@ export const arweaveTxFetchCounter = new promClient.Counter({
 export const arweaveChunkPostCounter = new promClient.Counter({
   name: 'arweave_chunk_post_total',
   help: 'Counts individual POST request to endpoint',
-  labelNames: ['endpoint', 'status'],
+  labelNames: ['endpoint', 'status', 'role'],
 });
 
 export const arweaveChunkBroadcastCounter = new promClient.Counter({
@@ -204,7 +212,9 @@ export const lastHeightImported = new promClient.Gauge({
   help: 'Height of the last block imported',
 });
 
+//
 // Redis Cache Metrics
+//
 
 export const redisConnectionErrorsCounter = new promClient.Counter({
   name: 'redis_connection_errors_total',
@@ -231,7 +241,9 @@ export const arnsResolutionTime = new promClient.Summary({
   help: 'Time in ms it takes to resolve an arns name',
 });
 
+//
 // Data source metrics
+//
 
 export const getDataErrorsTotal = new promClient.Counter({
   name: 'get_data_errors_total',
@@ -251,7 +263,9 @@ export const getDataStreamSuccessesTotal = new promClient.Counter({
   labelNames: ['class'],
 });
 
+//
 // Queue length metrics
+//
 
 const queues: { [key: string]: { length: () => number } } = {};
 export function registerQueueLengthGauge(
@@ -270,4 +284,13 @@ export const queueLengthGauge = new Gauge({
       this.set({ queue_name: queueName }, queue.length());
     });
   },
+});
+
+//
+// Filesystem cleanup metrics
+//
+
+export const filesCleanedTotal = new promClient.Counter({
+  name: 'files_cleaned_total',
+  help: 'Count of files deleted by the filesystem cleanup worker',
 });

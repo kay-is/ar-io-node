@@ -19,7 +19,7 @@ import winston from 'winston';
 
 import { isValidDataId } from '../lib/validation.js';
 import { NameResolution, NameResolver } from '../types.js';
-import { ANT, AoClient, AoIORead, AOProcess, IO } from '@ar.io/sdk';
+import { ANT, AoClient, AoARIORead, AOProcess, ARIO } from '@ar.io/sdk';
 import * as config from '../config.js';
 import { connect } from '@permaweb/aoconnect';
 import CircuitBreaker from 'opossum';
@@ -27,11 +27,11 @@ import * as metrics from '../metrics.js';
 
 export class OnDemandArNSResolver implements NameResolver {
   private log: winston.Logger;
-  private networkProcess: AoIORead;
+  private networkProcess: AoARIORead;
   private ao: AoClient;
   private aoCircuitBreaker: CircuitBreaker<
-    Parameters<AoIORead['getArNSRecord']>,
-    Awaited<ReturnType<AoIORead['getArNSRecord']>>
+    Parameters<AoARIORead['getArNSRecord']>,
+    Awaited<ReturnType<AoARIORead['getArNSRecord']>>
   >;
 
   constructor({
@@ -42,7 +42,7 @@ export class OnDemandArNSResolver implements NameResolver {
       GRAPHQL_URL: config.AO_GRAPHQL_URL,
       GATEWAY_URL: config.AO_GATEWAY_URL,
     }),
-    networkProcess = IO.init({
+    networkProcess = ARIO.init({
       process: new AOProcess({
         processId: config.IO_PROCESS_ID,
         ao: ao,
@@ -58,7 +58,7 @@ export class OnDemandArNSResolver implements NameResolver {
     },
   }: {
     log: winston.Logger;
-    networkProcess?: AoIORead;
+    networkProcess?: AoARIORead;
     ao?: AoClient;
     circuitBreakerOptions?: CircuitBreaker.Options;
   }) {
@@ -83,7 +83,7 @@ export class OnDemandArNSResolver implements NameResolver {
   async resolve(name: string): Promise<NameResolution> {
     this.log.info('Resolving name...', { name });
     try {
-      // get the base name which is the last of th array split by _
+      // get the base name which is the last of the array split by _
       const baseName = name.split('_').pop();
       if (baseName === undefined) {
         throw new Error('Invalid name');

@@ -18,7 +18,7 @@
 import { default as Arweave } from 'arweave';
 import EventEmitter from 'node:events';
 import fs from 'node:fs';
-import { AOProcess, IO } from '@ar.io/sdk';
+import { AOProcess, ARIO } from '@ar.io/sdk';
 import awsLite from '@aws-lite/client';
 import awsLiteS3 from '@aws-lite/s3';
 
@@ -82,11 +82,12 @@ import { connect } from '@permaweb/aoconnect';
 import { DataContentAttributeImporter } from './workers/data-content-attribute-importer.js';
 import { SignatureFetcher } from './data/signature-fetcher.js';
 import { SQLiteWalCleanupWorker } from './workers/sqlite-wal-cleanup-worker.js';
-import { KvArnsStore } from './store/kv-arns-store.js';
+import { KvArNSResolutionStore } from './store/kv-arns-name-resolution-store.js';
 import { parquetExporter } from './routes/ar-io.js';
 import { server } from './app.js';
 import { S3DataStore } from './store/s3-data-store.js';
 import { BlockedNamesCache } from './blocked-names-cache.js';
+import { KvArNSRegistryStore } from './store/kv-arns-base-name-store.js';
 
 process.on('uncaughtException', (error) => {
   metrics.uncaughtExceptionCounter.inc();
@@ -97,7 +98,7 @@ const arweave = Arweave.init({});
 
 // IO/AO SDK
 
-const arIO = IO.init({
+const arIO = ARIO.init({
   process: new AOProcess({
     processId: config.IO_PROCESS_ID,
     ao: connect({
@@ -241,7 +242,7 @@ eventEmitter.on(events.TX_INDEXED, async (tx: MatchableItem) => {
   if (await ans104TxMatcher.match(tx)) {
     metrics.bundlesCounter.inc({
       bundle_format: 'ans-104',
-      parent_type: 'transaction',
+      contiguous_data_type: 'transaction',
     });
     eventEmitter.emit(events.ANS104_TX_INDEXED, tx);
     eventEmitter.emit(events.ANS104_BUNDLE_INDEXED, tx);
@@ -254,7 +255,7 @@ eventEmitter.on(
     if (await ans104TxMatcher.match(item)) {
       metrics.bundlesCounter.inc({
         bundle_format: 'ans-104',
-        parent_type: 'data_item',
+        contiguous_data_type: 'data_item',
       });
       eventEmitter.emit(events.ANS104_NESTED_BUNDLE_INDEXED, item);
       eventEmitter.emit(events.ANS104_BUNDLE_INDEXED, item);
@@ -479,12 +480,15 @@ export const bundleDataImporter = new BundleDataImporter({
 metrics.registerQueueLengthGauge('bundleDataImporter', {
   length: () => bundleDataImporter.queueDepth(),
 });
-
-async function queueBundle(
+export type QueueBundleResponse = {
+  status: 'skipped' | 'queued' | 'error';
+  error?: string;
+};
+export async function queueBundle(
   item: NormalizedDataItem | PartialJsonTransaction,
   isPrioritized = false,
   bypassFilter = false,
-) {
+): Promise<QueueBundleResponse> {
   try {
     if ('root_tx_id' in item && item.root_tx_id === null) {
       log.debug('Skipping download of optimistically indexed data item', {
@@ -492,7 +496,7 @@ async function queueBundle(
         rootTxId: item.root_tx_id,
         parentId: item.parent_id,
       });
-      return;
+      return { status: 'skipped' };
     }
 
     await db.saveBundle({
@@ -519,6 +523,7 @@ async function queueBundle(
               : -1, // parent indexes are not needed for L1
         },
         isPrioritized,
+        bypassFilter,
       );
       metrics.bundlesQueuedCounter.inc({ bundle_format: 'ans-104' });
     } else {
@@ -529,21 +534,17 @@ async function queueBundle(
         skippedAt: currentUnixTimestamp(),
       });
     }
+
+    return { status: 'queued' };
   } catch (error: any) {
     log.error('Error saving or queueing bundle', {
       message: error.message,
       stack: error.stack,
     });
+
+    return { status: 'error', error: 'Error queueing bundle' };
   }
 }
-
-// Queue bundles from the queue-bundle route
-eventEmitter.on(
-  events.ANS104_BUNDLE_QUEUED,
-  async (item: NormalizedDataItem | PartialJsonTransaction) => {
-    await queueBundle(item, true, true);
-  },
-);
 
 // Queue L1 bundles
 eventEmitter.on(
@@ -567,6 +568,10 @@ eventEmitter.on(
 eventEmitter.on(events.ANS104_UNBUNDLE_COMPLETE, async (bundleEvent: any) => {
   try {
     metrics.bundlesUnbundledCounter.inc({ bundle_format: 'ans-104' });
+    metrics.dataItemsUnbundledCounter.inc(
+      { bundle_format: 'ans-104' },
+      bundleEvent.itemCount,
+    );
     db.saveBundle({
       id: bundleEvent.parentId,
       format: 'ans-104',
@@ -593,7 +598,20 @@ export const manifestPathResolver = new StreamingManifestPathResolver({
   log,
 });
 
-export const arnsResolverCache = new KvArnsStore({
+export const arnsResolutionCache = new KvArNSResolutionStore({
+  hashKeyPrefix: 'arns', // all arns resolution cache keys start with 'arns'
+  kvBufferStore: createArNSKvStore({
+    log,
+    type: config.ARNS_CACHE_TYPE,
+    redisUrl: config.REDIS_CACHE_URL,
+    ttlSeconds: config.ARNS_CACHE_TTL_SECONDS,
+    maxKeys: config.ARNS_CACHE_MAX_KEYS,
+    useTls: config.REDIS_USE_TLS,
+  }),
+});
+
+export const arnsRegistryCache = new KvArNSRegistryStore({
+  hashKeyPrefix: 'registry', // all arns registry cache keys start with 'registry'
   kvBufferStore: createArNSKvStore({
     log,
     type: config.ARNS_CACHE_TYPE,
@@ -609,7 +627,8 @@ export const nameResolver = createArNSResolver({
   trustedGatewayUrl: config.TRUSTED_ARNS_GATEWAY_URL,
   resolutionOrder: config.ARNS_RESOLVER_PRIORITY_ORDER,
   networkProcess: arIO,
-  cache: arnsResolverCache,
+  resolutionCache: arnsResolutionCache,
+  registryCache: arnsRegistryCache,
   overrides: {
     ttlSeconds: config.ARNS_RESOLVER_OVERRIDE_TTL_SECONDS,
     // TODO: other overrides like fallback txId if not found in resolution
@@ -690,7 +709,8 @@ export const shutdown = async (exitCode = 0) => {
       arIODataSource.stopUpdatingPeers();
       dataSqliteWalCleanupWorker?.stop();
       parquetExporter?.stop();
-      await arnsResolverCache.close();
+      await arnsResolutionCache.close();
+      await arnsRegistryCache.close();
       await mempoolWatcher?.stop();
       await blockImporter.stop();
       await dataItemIndexer.stop();

@@ -17,6 +17,7 @@
  */
 import { canonicalize } from 'json-canonicalize';
 import { isMainThread } from 'node:worker_threads';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { createFilter } from './filters.js';
 import * as env from './lib/env.js';
@@ -31,9 +32,20 @@ export const PORT = +env.varOrDefault('PORT', '4000');
 
 // API key for accessing admin HTTP endpoints
 // It's set once in the main thread
-export const ADMIN_API_KEY = isMainThread
+export let ADMIN_API_KEY = isMainThread
   ? env.varOrRandom('ADMIN_API_KEY')
   : undefined;
+
+const ADMIN_API_KEY_FILE = isMainThread
+  ? env.varOrUndefined('ADMIN_API_KEY_FILE')
+  : undefined;
+
+if (ADMIN_API_KEY_FILE !== undefined) {
+  if (!existsSync(ADMIN_API_KEY_FILE)) {
+    throw new Error(`ADMIN_API_KEY_FILE not found: ${ADMIN_API_KEY_FILE}`);
+  }
+  ADMIN_API_KEY = readFileSync(ADMIN_API_KEY_FILE).toString().trim();
+}
 
 //
 // Nodes
@@ -79,6 +91,30 @@ Object.entries(TRUSTED_GATEWAYS_URLS).forEach(([url, weight]) => {
 export const CHUNK_POST_URLS = env
   .varOrDefault('CHUNK_POST_URLS', `${TRUSTED_NODE_URL}/chunk`)
   .split(',');
+
+const SECONDARY_CHUNK_POST_URLS_STRING = env.varOrUndefined(
+  'SECONDARY_CHUNK_POST_URLS',
+);
+export const SECONDARY_CHUNK_POST_URLS =
+  SECONDARY_CHUNK_POST_URLS_STRING !== undefined
+    ? SECONDARY_CHUNK_POST_URLS_STRING.split(',')
+    : [];
+
+const SECONDARY_CHUNK_POST_CONCURRENCY_LIMIT_STRING = env.varOrUndefined(
+  'SECONDARY_CHUNK_POST_CONCURRENCY_LIMIT',
+);
+export const SECONDARY_CHUNK_POST_CONCURRENCY_LIMIT =
+  SECONDARY_CHUNK_POST_CONCURRENCY_LIMIT_STRING !== undefined
+    ? +SECONDARY_CHUNK_POST_CONCURRENCY_LIMIT_STRING
+    : 2;
+
+const SECONDARY_CHUNK_POST_MIN_SUCCESS_COUNT_STRING = env.varOrUndefined(
+  'SECONDARY_CHUNK_POST_MIN_SUCCESS_COUNT',
+);
+export const SECONDARY_CHUNK_POST_MIN_SUCCESS_COUNT =
+  SECONDARY_CHUNK_POST_MIN_SUCCESS_COUNT_STRING !== undefined
+    ? +SECONDARY_CHUNK_POST_MIN_SUCCESS_COUNT_STRING
+    : 1;
 
 // Chunk POST response timeout in milliseconds
 const CHUNK_POST_RESPONSE_TIMEOUT_MS_STRING = env.varOrUndefined(
@@ -202,6 +238,40 @@ export const MAX_DATA_ITEM_QUEUE_SIZE = +env.varOrDefault(
 export const BUNDLE_DATA_IMPORTER_QUEUE_SIZE = +env.varOrDefault(
   'BUNDLE_DATA_IMPORTER_QUEUE_SIZE',
   '1000',
+);
+
+// The maximum number of data items indexed to flush stable data items
+export const DATA_ITEM_FLUSH_COUNT_THRESHOLD = +env.varOrDefault(
+  'DATA_ITEM_FLUSH_COUNT_THRESHOLD',
+  '1000',
+);
+
+// The interval in seconds to flush stable data items
+export const MAX_FLUSH_INTERVAL_SECONDS = +env.varOrDefault(
+  'MAX_FLUSH_INTERVAL_SECONDS',
+  '600',
+);
+
+//
+// File system cleanup
+//
+
+// The number of files to process in each batch during cleanup
+export const FS_CLEANUP_WORKER_BATCH_SIZE = +env.varOrDefault(
+  'FS_CLEANUP_WORKER_BATCH_SIZE',
+  '2000',
+);
+
+// The pause duration between cleanup batches in milliseconds
+export const FS_CLEANUP_WORKER_BATCH_PAUSE_DURATION = +env.varOrDefault(
+  'FS_CLEANUP_WORKER_BATCH_PAUSE_DURATION',
+  '5000',
+);
+
+// The pause duration before restarting cleanup from the beginning in milliseconds
+export const FS_CLEANUP_WORKER_RESTART_PAUSE_DURATION = +env.varOrDefault(
+  'FS_CLEANUP_WORKER_RESTART_PAUSE_DURATION',
+  `${1000 * 60 * 60 * 4}`, // every 4 hours
 );
 
 //
@@ -398,6 +468,30 @@ export const ARNS_NAMES_CACHE_TTL_SECONDS = +env.varOrDefault(
   'ARNS_NAMES_CACHE_TTL_SECONDS',
   `${5 * 60}`, // 5 minutes
 );
+
+export const ARNS_NAME_LIST_CACHE_MISS_REFRESH_INTERVAL_SECONDS =
+  +env.varOrDefault(
+    'ARNS_NAME_LIST_CACHE_MISS_REFRESH_INTERVAL_SECONDS',
+    `${10}`, // 10 seconds
+  );
+
+export const ARNS_NAME_LIST_CACHE_HIT_REFRESH_INTERVAL_SECONDS =
+  +env.varOrDefault(
+    'ARNS_NAME_LIST_CACHE_HIT_REFRESH_INTERVAL_SECONDS',
+    `${60 * 60}`, // 1 hour
+  );
+
+export const ARNS_ANT_STATE_CACHE_MISS_REFRESH_INTERVAL_SECONDS =
+  +env.varOrDefault(
+    'ARNS_ANT_STATE_CACHE_MISS_REFRESH_INTERVAL_SECONDS',
+    `${10}`, // 10 seconds
+  );
+
+export const ARNS_ANT_STATE_CACHE_HIT_REFRESH_INTERVAL_SECONDS =
+  +env.varOrDefault(
+    'ARNS_ANT_STATE_CACHE_HIT_REFRESH_INTERVAL_SECONDS',
+    `${60 * 5}`, // 5 minutes
+  );
 
 // TODO: support multiple gateway urls
 export const TRUSTED_ARNS_GATEWAY_URL = env.varOrUndefined(

@@ -4,7 +4,7 @@ services:
     image: ghcr.io/ar-io/ar-io-envoy:${ENVOY_IMAGE_TAG:-0d3e2a9594f0520a2f374450851fd4ddf1321c09}
     build:
       context: envoy/
-    restart: on-failure
+    restart: unless-stopped
     ports:
       - '3000:3000'
       #- '9901:9901' # don't expose admin port by default
@@ -25,10 +25,10 @@ services:
       - observer
 
   core:
-    image: ghcr.io/ar-io/ar-io-core:${CORE_IMAGE_TAG:-59e66be99e1f6b5df09b9117934fe49ff8124f38}
+    image: ghcr.io/ar-io/ar-io-core:${CORE_IMAGE_TAG:-cb2f03ea2daf0cc7ed5f2cf14af0fb2c28042cea}
     build:
       context: .
-    restart: on-failure
+    restart: unless-stopped
     ports:
       - 4000:4000
     volumes:
@@ -60,6 +60,8 @@ services:
       - ANS104_DOWNLOAD_WORKERS=${ANS104_DOWNLOAD_WORKERS:-}
       - ANS104_UNBUNDLE_FILTER=${ANS104_UNBUNDLE_FILTER:-}
       - ANS104_INDEX_FILTER=${ANS104_INDEX_FILTER:-}
+      - DATA_ITEM_FLUSH_COUNT_THRESHOLD=${DATA_ITEM_FLUSH_COUNT_THRESHOLD:-}
+      - MAX_FLUSH_INTERVAL_SECONDS=${MAX_FLUSH_INTERVAL_SECONDS:-}
       - ARNS_ROOT_HOST=${ARNS_ROOT_HOST:-}
       - SANDBOX_PROTOCOL=${SANDBOX_PROTOCOL:-}
       - START_WRITERS=${START_WRITERS:-}
@@ -91,8 +93,11 @@ services:
       - AWS_ENDPOINT=${AWS_ENDPOINT:-}
       - AWS_S3_CONTIGUOUS_DATA_BUCKET=${AWS_S3_CONTIGUOUS_DATA_BUCKET:-}
       - AWS_S3_CONTIGUOUS_DATA_PREFIX=${AWS_S3_CONTIGUOUS_DATA_PREFIX:-}
-      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-22}
+      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-23}
       - CHUNK_POST_URLS=${CHUNK_POST_URLS:-}
+      - CHUNK_POST_MIN_SUCCESS_COUNT=${CHUNK_POST_MIN_SUCCESS_COUNT:-}
+      - SECONDARY_CHUNK_POST_CONCURRENCY_LIMIT=${SECONDARY_CHUNK_POST_CONCURRENCY_LIMIT:-}
+      - SECONDARY_CHUNK_POST_URLS=${SECONDARY_CHUNK_POST_URLS:-}
       - CHUNK_POST_RESPONSE_TIMEOUT_MS=${CHUNK_POST_RESPONSE_TIMEOUT_MS:-}
       - CHUNK_POST_ABORT_TIMEOUT_MS=${CHUNK_POST_ABORT_TIMEOUT_MS:-}
       - AO_CU_URL=${AO_CU_URL:-}
@@ -109,6 +114,9 @@ services:
       - BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS=${BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS:-}
       - CLICKHOUSE_URL=${CLICKHOUSE_URL:-}
       - BUNDLE_DATA_IMPORTER_QUEUE_SIZE=${BUNDLE_DATA_IMPORTER_QUEUE_SIZE:-}
+      - FS_CLEANUP_WORKER_BATCH_SIZE=${FS_CLEANUP_WORKER_BATCH_SIZE:-}
+      - FS_CLEANUP_WORKER_BATCH_PAUSE_DURATION=${FS_CLEANUP_WORKER_BATCH_PAUSE_DURATION:-}
+      - FS_CLEANUP_WORKER_RESTART_PAUSE_DURATION=${FS_CLEANUP_WORKER_RESTART_PAUSE_DURATION:-}
     networks:
       - ar-io-network
     depends_on:
@@ -119,7 +127,7 @@ services:
   redis:
     image: redis:${REDIS_IMAGE_TAG:-7}
     command: redis-server --maxmemory ${REDIS_MAX_MEMORY:-256mb} --maxmemory-policy allkeys-lru ${EXTRA_REDIS_FLAGS:---save "" --appendonly no}
-    restart: on-failure
+    restart: unless-stopped
     ports:
       - '6379' # don't expose redis externally by default
     volumes:
@@ -146,13 +154,13 @@ services:
       - ar-io-network
 
   clickhouse-auto-import:
-    image: ghcr.io/ar-io/ar-io-clickhouse-auto-import:${CLICKHOUSE_AUTO_IMPORT_IMAGE_TAG:-59e66be99e1f6b5df09b9117934fe49ff8124f38}
+    image: ghcr.io/ar-io/ar-io-clickhouse-auto-import:${CLICKHOUSE_AUTO_IMPORT_IMAGE_TAG:-latest}
     profiles:
       - clickhouse
     build:
       context: .
       dockerfile: Dockerfile.clickhouse-auto-import
-    restart: on-failure
+    restart: unless-stopped
     volumes:
       - ${PARQUET_DATA_PATH:-./data/parquet}:/app/data/parquet
     environment:
@@ -169,8 +177,8 @@ services:
       - clickhouse
 
   observer:
-    image: ghcr.io/ar-io/ar-io-observer:${OBSERVER_IMAGE_TAG:-c8d2ba1dbc8d1b4efd60c6ec041986fedbaa0d89}
-    restart: on-failure
+    image: ghcr.io/ar-io/ar-io-observer:${OBSERVER_IMAGE_TAG:-9d9c5868de88cddcc5a9605e7d90bc74d280857a}
+    restart: unless-stopped
     ports:
       - 5050:5050
     volumes:
@@ -187,7 +195,7 @@ services:
       - REPORT_GENERATION_INTERVAL_MS=${REPORT_GENERATION_INTERVAL_MS:-}
       - RUN_OBSERVER=${RUN_OBSERVER:-true}
       - MIN_RELEASE_NUMBER=${MIN_RELEASE_NUMBER:-0}
-      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-22}
+      - AR_IO_NODE_RELEASE=${AR_IO_NODE_RELEASE:-23}
       - AO_CU_URL=${AO_CU_URL:-}
       - AO_MU_URL=${AO_MU_URL:-}
       - AO_GATEWAY_URL=${AO_GATEWAY_URL:-}
