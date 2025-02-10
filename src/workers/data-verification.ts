@@ -19,21 +19,20 @@
 import { default as fastq } from 'fastq';
 import type { queueAsPromised } from 'fastq';
 import * as winston from 'winston';
+import { DataImporter } from './data-importer.js';
 import { ContiguousDataIndex, ContiguousDataSource } from '../types.js';
 import { DataRootComputer } from '../lib/data-root.js';
 import * as config from '../config.js';
-
-const DEFAULT_STREAM_TIMEOUT = 1000 * 30; // 30 seconds
-const DEFAULT_WORKER_COUNT = 1;
 
 export class DataVerificationWorker {
   // Dependencies
   private log: winston.Logger;
   private contiguousDataIndex: ContiguousDataIndex;
   private dataRootComputer: DataRootComputer;
+  private dataImporter: DataImporter | undefined;
 
   private workerCount: number;
-  private queue: queueAsPromised<string, void>;
+  private queue: queueAsPromised<string, void | boolean>;
   private interval: number;
   private intervalId?: NodeJS.Timeout;
 
@@ -41,13 +40,15 @@ export class DataVerificationWorker {
     log,
     contiguousDataIndex,
     contiguousDataSource,
-    workerCount = DEFAULT_WORKER_COUNT,
-    streamTimeout = DEFAULT_STREAM_TIMEOUT,
+    dataImporter,
+    workerCount = config.BACKGROUND_DATA_VERIFICATION_WORKER_COUNT,
+    streamTimeout = config.BACKGROUND_DATA_VERIFICATION_STREAM_TIMEOUT_MS,
     interval = config.BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS * 1000,
   }: {
     log: winston.Logger;
     contiguousDataIndex: ContiguousDataIndex;
     contiguousDataSource: ContiguousDataSource;
+    dataImporter?: DataImporter;
     workerCount?: number;
     streamTimeout?: number;
     interval?: number;
@@ -66,6 +67,8 @@ export class DataVerificationWorker {
       workerCount,
       streamTimeout,
     });
+
+    this.dataImporter = dataImporter;
   }
 
   async start(): Promise<void> {
@@ -87,7 +90,7 @@ export class DataVerificationWorker {
       return;
     }
 
-    const dataIds = await this.contiguousDataIndex.getUnverifiedDataIds();
+    const dataIds = await this.contiguousDataIndex.getVerifiableDataIds();
     const rootTxIds: string[] = [];
 
     for (const dataId of dataIds) {
@@ -106,7 +109,7 @@ export class DataVerificationWorker {
     }
   }
 
-  async verifyDataRoot(id: string): Promise<void> {
+  async verifyDataRoot(id: string): Promise<boolean> {
     const log = this.log.child({ method: 'verifyDataRoot', id });
     try {
       const dataAttributes =
@@ -114,26 +117,50 @@ export class DataVerificationWorker {
 
       if (dataAttributes === undefined) {
         log.warn('Data attributes not found.');
-        return;
+        return false;
+      }
+
+      if (dataAttributes.dataRoot === undefined) {
+        log.warn(
+          'Data root not found for id. Transaction must be indexed before it can be verified.',
+        );
+        return false;
       }
 
       const indexedDataRoot = dataAttributes.dataRoot;
-      const computedDataRoot = await this.dataRootComputer.computeDataRoot(id);
 
-      if (indexedDataRoot !== computedDataRoot) {
+      const computedDataRoot: string | undefined = await this.dataRootComputer
+        .computeDataRoot(id)
+        .catch((error) => {
+          log.debug('Error computing data root.', { error });
+          return undefined;
+        });
+
+      if (
+        computedDataRoot === undefined ||
+        indexedDataRoot !== computedDataRoot
+      ) {
         log.error('Data root mismatch', {
           indexedDataRoot,
           computedDataRoot,
         });
-
-        return;
+        if (this.dataImporter) {
+          log.debug(
+            'Because of data-root mismatch, we are queueing data item for reimport.',
+            { id },
+          );
+          await this.dataImporter.queueItem({ id }, true);
+        }
+        return false;
       }
 
       log.debug('Data root verified successfull.');
       await this.contiguousDataIndex.saveVerificationStatus(id);
       log.debug('Saved verified status successfully.');
+      return true;
     } catch (error) {
       log.error('Error verifying data root', { error });
+      return false;
     }
   }
 
@@ -145,7 +172,6 @@ export class DataVerificationWorker {
     const log = this.log.child({ method: 'stop' });
     clearInterval(this.intervalId);
     this.queue.kill();
-    await this.queue.drained();
     await this.dataRootComputer.stop();
     log.debug('Stopped successfully.');
   }

@@ -20,7 +20,7 @@ import { asyncMiddleware } from 'middleware-async';
 
 import * as config from '../config.js';
 import { headerNames } from '../constants.js';
-import { sendNotFound } from '../routes/data/handlers.js';
+import { sendNotFound, sendPaymentRequired } from '../routes/data/handlers.js';
 import { DATA_PATH_REGEX } from '../constants.js';
 import { NameResolution, NameResolver } from '../types.js';
 import * as metrics from '../metrics.js';
@@ -93,13 +93,15 @@ export const createArnsMiddleware = ({
           return arnsResolutionPromise;
         }
       }
-      const arnsResolutionPromise = nameResolver.resolve(arnsSubdomain);
+      const arnsResolutionPromise = nameResolver.resolve({
+        name: arnsSubdomain,
+      });
       arnsRequestCache.set(arnsSubdomain, arnsResolutionPromise);
       return arnsResolutionPromise;
     };
 
     const start = Date.now();
-    const { resolvedId, ttl, processId, resolvedAt } =
+    const { resolvedId, ttl, processId, resolvedAt, limit, index } =
       await getArnsResolutionPromise().finally(() => {
         // remove from cache after resolution
         arnsRequestCache.del(arnsSubdomain);
@@ -109,10 +111,24 @@ export const createArnsMiddleware = ({
       sendNotFound(res);
       return;
     }
+
     res.header(headerNames.arnsResolvedId, resolvedId);
     res.header(headerNames.arnsTtlSeconds, ttl.toString());
     res.header(headerNames.arnsProcessId, processId);
     res.header(headerNames.arnsResolvedAt, resolvedAt.toString());
+    // limit and index can be undefined if they come from the cache
+    res.header(headerNames.arnsLimit, limit?.toString());
+    res.header(headerNames.arnsIndex, index?.toString());
+
+    // handle undername limit exceeded
+    if (config.ARNS_RESOLVER_ENFORCE_UNDERNAME_LIMIT && index > limit) {
+      sendPaymentRequired(
+        res,
+        'ArNS undername limit exceeded. Purchase additional undernames to continue.',
+      );
+      return;
+    }
+
     // TODO: add a header for arns cache status
     res.header('Cache-Control', `public, max-age=${ttl}`);
     dataHandler(req, res, next);

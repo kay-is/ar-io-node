@@ -87,6 +87,19 @@ Object.entries(TRUSTED_GATEWAYS_URLS).forEach(([url, weight]) => {
   }
 });
 
+export const TRUSTED_GATEWAYS_REQUEST_TIMEOUT_MS = +env.varOrDefault(
+  'TRUSTED_GATEWAYS_REQUEST_TIMEOUT_MS',
+  '10000',
+);
+
+export const WEIGHTED_PEERS_TEMPERATURE_DELTA = +env.varOrDefault(
+  'WEIGHTED_PEERS_TEMPERATURE_DELTA',
+  '2',
+);
+
+export const ARWEAVE_NODE_IGNORE_URLS: string[] =
+  env.varOrUndefined('ARWEAVE_NODE_IGNORE_URLS')?.split(',') ?? [];
+
 // Trusted chunk POST URLs (for posting chunks received at /chunk)
 export const CHUNK_POST_URLS = env
   .varOrDefault('CHUNK_POST_URLS', `${TRUSTED_NODE_URL}/chunk`)
@@ -147,7 +160,7 @@ export const CHUNK_POST_MIN_SUCCESS_COUNT = +env.varOrDefault(
 export const ON_DEMAND_RETRIEVAL_ORDER = env
   .varOrDefault(
     'ON_DEMAND_RETRIEVAL_ORDER',
-    's3,trusted-gateways,chunks,tx-data',
+    's3,trusted-gateways,chunks,tx-data,ar-io-peers',
   )
   .split(',');
 
@@ -217,11 +230,11 @@ export const BACKFILL_BUNDLE_RECORDS =
 
 // Whether or not to write the data item signatures to the database
 export const WRITE_ANS104_DATA_ITEM_DB_SIGNATURES =
-  env.varOrDefault('WRITE_ANS104_DATA_ITEM_DB_SIGNATURES', 'true') === 'true';
+  env.varOrDefault('WRITE_ANS104_DATA_ITEM_DB_SIGNATURES', 'false') === 'true';
 
 // Whether or not to write the transaction signatures to the database
 export const WRITE_TRANSACTION_DB_SIGNATURES =
-  env.varOrDefault('WRITE_TRANSACTION_DB_SIGNATURES', 'true') === 'true';
+  env.varOrDefault('WRITE_TRANSACTION_DB_SIGNATURES', 'false') === 'true';
 
 // Whether or not to enable the data database WAL cleanup worker
 export const ENABLE_DATA_DB_WAL_CLEANUP =
@@ -240,6 +253,12 @@ export const BUNDLE_DATA_IMPORTER_QUEUE_SIZE = +env.varOrDefault(
   '1000',
 );
 
+// The maximum number of data imports to queue for verification purposes
+export const VERIFICATION_DATA_IMPORTER_QUEUE_SIZE = +env.varOrDefault(
+  'VERIFICATION_DATA_IMPORTER_QUEUE_SIZE',
+  '1000',
+);
+
 // The maximum number of data items indexed to flush stable data items
 export const DATA_ITEM_FLUSH_COUNT_THRESHOLD = +env.varOrDefault(
   'DATA_ITEM_FLUSH_COUNT_THRESHOLD',
@@ -250,6 +269,16 @@ export const DATA_ITEM_FLUSH_COUNT_THRESHOLD = +env.varOrDefault(
 export const MAX_FLUSH_INTERVAL_SECONDS = +env.varOrDefault(
   'MAX_FLUSH_INTERVAL_SECONDS',
   '600',
+);
+
+export const BUNDLE_REPAIR_RETRY_INTERVAL_SECONDS = +env.varOrDefault(
+  'BUNDLE_REPAIR_RETRY_INTERVAL_SECONDS',
+  '300', // 5 minutes
+);
+
+export const BUNDLE_REPAIR_RETRY_BATCH_SIZE = +env.varOrDefault(
+  'BUNDLE_REPAIR_RETRY_BATCH_SIZE',
+  '1000',
 );
 
 //
@@ -285,6 +314,16 @@ export const ENABLE_BACKGROUND_DATA_VERIFICATION =
 export const BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS = +env.varOrDefault(
   'BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS',
   '600', // 10 minutes
+);
+
+export const BACKGROUND_DATA_VERIFICATION_WORKER_COUNT = +env.varOrDefault(
+  'BACKGROUND_DATA_VERIFICATION_WORKER_COUNT',
+  '1',
+);
+
+export const BACKGROUND_DATA_VERIFICATION_STREAM_TIMEOUT_MS = +env.varOrDefault(
+  'BACKGROUND_DATA_VERIFICATION_STREAM_TIMEOUT_MS',
+  `${1000 * 30}`, // 30 seconds
 );
 
 //
@@ -416,16 +455,34 @@ export const WEBHOOK_BLOCK_FILTER = createFilter(
 // ArNS Resolution
 //
 
+export const AR_IO_SDK_LOG_LEVEL = env.varOrDefault(
+  'AR_IO_SDK_LOG_LEVEL',
+  'none',
+);
+
 export const ARNS_CACHE_TYPE = env.varOrDefault('ARNS_CACHE_TYPE', 'node');
 
+// Amount of time that entries stay in the cache (ArNS record TTL still applies
+// on top of this)
 export const ARNS_CACHE_TTL_SECONDS = +env.varOrDefault(
   'ARNS_CACHE_TTL_SECONDS',
-  `${60 * 60}`, // 1 hour
+  `${60 * 60 * 24}`, // 24 hours
+);
+
+// The maximum amount of time to wait for resolution from AO if there is a
+// cached value that can be served. When the timeout occurs, caches will still
+// be refreshed in the background.
+export const ARNS_CACHED_RESOLUTION_FALLBACK_TIMEOUT_MS = +env.varOrDefault(
+  'ARNS_CACHED_RESOLUTION_FALLBACK_TIMEOUT_MS',
+  '250',
 );
 
 export const ARNS_RESOLVER_OVERRIDE_TTL_SECONDS_STRING = env.varOrUndefined(
   'ARNS_RESOLVER_OVERRIDE_TTL_SECONDS',
 );
+
+export const ARNS_RESOLVER_ENFORCE_UNDERNAME_LIMIT =
+  env.varOrDefault('ARNS_RESOLVER_ENFORCE_UNDERNAME_LIMIT', 'true') === 'true';
 
 export const ARNS_RESOLVER_OVERRIDE_TTL_SECONDS =
   ARNS_RESOLVER_OVERRIDE_TTL_SECONDS_STRING !== undefined
@@ -466,7 +523,7 @@ export const ARNS_ON_DEMAND_CIRCUIT_BREAKER_RESET_TIMEOUT_MS =
 
 export const ARNS_NAMES_CACHE_TTL_SECONDS = +env.varOrDefault(
   'ARNS_NAMES_CACHE_TTL_SECONDS',
-  `${5 * 60}`, // 5 minutes
+  `${60 * 60}`, // 1 hour
 );
 
 export const ARNS_NAME_LIST_CACHE_MISS_REFRESH_INTERVAL_SECONDS =
@@ -481,16 +538,10 @@ export const ARNS_NAME_LIST_CACHE_HIT_REFRESH_INTERVAL_SECONDS =
     `${60 * 60}`, // 1 hour
   );
 
-export const ARNS_ANT_STATE_CACHE_MISS_REFRESH_INTERVAL_SECONDS =
+export const ARNS_ANT_STATE_CACHE_HIT_REFRESH_WINDOW_SECONDS =
   +env.varOrDefault(
-    'ARNS_ANT_STATE_CACHE_MISS_REFRESH_INTERVAL_SECONDS',
-    `${10}`, // 10 seconds
-  );
-
-export const ARNS_ANT_STATE_CACHE_HIT_REFRESH_INTERVAL_SECONDS =
-  +env.varOrDefault(
-    'ARNS_ANT_STATE_CACHE_HIT_REFRESH_INTERVAL_SECONDS',
-    `${60 * 5}`, // 5 minutes
+    'ARNS_ANT_STATE_CACHE_HIT_REFRESH_WINDOW_SECONDS',
+    `${30}`, // 30 seconds
   );
 
 // TODO: support multiple gateway urls

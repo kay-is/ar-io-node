@@ -18,7 +18,7 @@
 import { default as Arweave } from 'arweave';
 import EventEmitter from 'node:events';
 import fs from 'node:fs';
-import { AOProcess, ARIO } from '@ar.io/sdk';
+import { AOProcess, ARIO, Logger as ARIOLogger } from '@ar.io/sdk';
 import awsLite from '@aws-lite/client';
 import awsLiteS3 from '@aws-lite/s3';
 
@@ -29,7 +29,7 @@ import { ReadThroughChunkDataCache } from './data/read-through-chunk-data-cache.
 import { ReadThroughDataCache } from './data/read-through-data-cache.js';
 import { SequentialDataSource } from './data/sequential-data-source.js';
 import { TxChunksDataSource } from './data/tx-chunks-data-source.js';
-import { BundleDataImporter } from './workers/bundle-data-importer.js';
+import { DataImporter } from './workers/data-importer.js';
 import { CompositeClickHouseDatabase } from './database/composite-clickhouse.js';
 import { StandaloneSqliteDatabase } from './database/standalone-sqlite.js';
 import * as events from './events.js';
@@ -97,6 +97,8 @@ process.on('uncaughtException', (error) => {
 const arweave = Arweave.init({});
 
 // IO/AO SDK
+
+ARIOLogger.default.setLogLevel(config.AR_IO_SDK_LOG_LEVEL as any);
 
 const arIO = ARIO.init({
   process: new AOProcess({
@@ -361,7 +363,9 @@ function getDataSource(sourceName: string): ContiguousDataSource | undefined {
   switch (sourceName) {
     case 's3':
       return s3DataSource;
+    // ario-peer is for backwards compatibility
     case 'ario-peer':
+    case 'ar-io-peers':
       return arIODataSource;
     case 'trusted-gateways':
       return gatewaysDataSource;
@@ -470,7 +474,16 @@ metrics.registerQueueLengthGauge('ans104Unbundler', {
   length: () => ans104Unbundler.queueDepth(),
 });
 
-export const bundleDataImporter = new BundleDataImporter({
+export const verificationDataImporter = new DataImporter({
+  log,
+  contiguousDataSource: txChunksDataSource,
+  workerCount: config.ANS104_DOWNLOAD_WORKERS,
+  maxQueueSize: config.VERIFICATION_DATA_IMPORTER_QUEUE_SIZE,
+});
+metrics.registerQueueLengthGauge('verificationDataImporter', {
+  length: () => verificationDataImporter.queueDepth(),
+});
+export const bundleDataImporter = new DataImporter({
   log,
   contiguousDataSource: backgroundContiguousDataSource,
   ans104Unbundler,
@@ -507,13 +520,34 @@ export async function queueBundle(
 
     if (bypassFilter || (await config.ANS104_UNBUNDLE_FILTER.match(item))) {
       metrics.bundlesMatchedCounter.inc({ bundle_format: 'ans-104' });
-      await db.saveBundle({
+      const {
+        unbundleFilterId,
+        indexFilterId,
+        previousUnbundleFilterId,
+        previousIndexFilterId,
+        lastFullyIndexedAt,
+      } = await db.saveBundle({
         id: item.id,
         format: 'ans-104',
         unbundleFilter: config.ANS104_UNBUNDLE_FILTER_STRING,
         indexFilter: config.ANS104_INDEX_FILTER_STRING,
         queuedAt: currentUnixTimestamp(),
       });
+
+      if (
+        unbundleFilterId !== null &&
+        indexFilterId !== null &&
+        unbundleFilterId === previousUnbundleFilterId &&
+        indexFilterId === previousIndexFilterId &&
+        // Only skip bundles that have been fully unbundled
+        lastFullyIndexedAt != null
+      ) {
+        log.info('Skipping fully unbundled bundle', {
+          id: item.id,
+        });
+        return { status: 'skipped' };
+      }
+
       bundleDataImporter.queueItem(
         {
           ...item,
@@ -577,6 +611,7 @@ eventEmitter.on(events.ANS104_UNBUNDLE_COMPLETE, async (bundleEvent: any) => {
       format: 'ans-104',
       dataItemCount: bundleEvent.itemCount,
       matchedDataItemCount: bundleEvent.matchedItemCount,
+      duplicatedDataItemCount: bundleEvent.duplicatedItemCount,
       unbundledAt: currentUnixTimestamp(),
     });
   } catch (error: any) {
@@ -606,7 +641,6 @@ export const arnsResolutionCache = new KvArNSResolutionStore({
     redisUrl: config.REDIS_CACHE_URL,
     ttlSeconds: config.ARNS_CACHE_TTL_SECONDS,
     maxKeys: config.ARNS_CACHE_MAX_KEYS,
-    useTls: config.REDIS_USE_TLS,
   }),
 });
 
@@ -618,7 +652,6 @@ export const arnsRegistryCache = new KvArNSRegistryStore({
     redisUrl: config.REDIS_CACHE_URL,
     ttlSeconds: config.ARNS_CACHE_TTL_SECONDS,
     maxKeys: config.ARNS_CACHE_MAX_KEYS,
-    useTls: config.REDIS_USE_TLS,
   }),
 });
 
@@ -681,6 +714,7 @@ const dataVerificationWorker = config.ENABLE_BACKGROUND_DATA_VERIFICATION
       log,
       contiguousDataIndex,
       contiguousDataSource: gatewaysDataSource,
+      dataImporter: verificationDataImporter,
     })
   : undefined;
 
@@ -719,16 +753,16 @@ export const shutdown = async (exitCode = 0) => {
       await txFetcher.stop();
       await txOffsetImporter.stop();
       await txOffsetRepairWorker.stop();
+      await verificationDataImporter.stop();
       await bundleDataImporter.stop();
       await bundleRepairWorker.stop();
       await ans104DataIndexer.stop();
       await ans104Unbundler.stop();
       await webhookEmitter.stop();
-      await db.stop();
       await headerFsCacheCleanupWorker?.stop();
       await contiguousDataFsCacheCleanupWorker?.stop();
       await dataVerificationWorker?.stop();
-
+      await db.stop();
       process.exit(exitCode);
     });
   }

@@ -4,6 +4,107 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Release 25] - 2025-02-07
+
+### Added
+
+- Added support for indexing and querying ECDSA signed Arweave transactions.
+- Expanded the OpenAPI specification to cover the entire gateway API and
+  commonly used Arweave node routes.
+- ArNS undername record count limits are now enforced. Undernames are sorted
+  based on their ANT configured priority with a fallback to name comparisons
+  when priorities conflict or are left unspecified. Enforcement is enabled by
+  default but can be disabled by setting the
+  `ARNS_RESOLVER_ENFORCE_UNDERNAME_LIMIT` to `false`.
+
+### Changed
+
+- Renamed the `ario-peer` data source to `ar-io-peers` for consistency and
+  clarity. `ario-peer` will continue to work for backwards compatibility but is
+  considered deprecated.
+- Use AR.IO gateway peers from the ar.io gateway address registry (GAR) as the
+  last fallback for fetching data when responding to client data requests. This
+  has the benefit of making the network more resilient to trusted gateway
+  disruptions, but it can also result in nodes serving data from less trusted
+  sources if it is not found in the trusted gateway. This can be disabled by
+  using a custom `ON_DEMAND_RETRIEVAL_ORDER` that does not include
+  `ar-io-peers`.
+- Arweave data chunk requests are sent to the trusted node first with a
+  fallback to Arweave peers when chunks are unavailable on the trusted node.
+  This provides good performance by default with a fallback in case there are
+  issues retrieving chunks from the trusted node.
+- Increased the observer socket timeout to 5 seconds to accommodate initial
+  slow responses for uncached ArNS resolutions.
+- Disabled writing base layer Arweave signatures to the SQLite DB by default to
+  save disk space. When signatures are required to satisfy GraphQL requests,
+  they are retrieved from headers on the trusted node.
+
+### Fixed
+
+- Updated dependencies to address security issues.
+- Improved reliability of failed bundle indexing retries.
+- Fixed failure to compute data roots for verification for base layer data
+  larger than 2GiB.
+- Fixed observer healthcheck by correcting node.js path in healthcheck script.
+
+## [Release 24] - 2025-02-03
+
+### Added
+
+- Added a `ARNS_ANT_STATE_CACHE_HIT_REFRESH_WINDOW_SECONDS` environment
+  variable that determines the number of seconds before the end of the TTL at
+  which to start attempting to refresh the ANT state.
+- Added a `TRUSTED_GATEWAYS_REQUEST_TIMEOUT_MS` environment that defaults to
+  10,000 and sets the number of milliseconds to wait before timing out request
+  to trusted gateways.
+- Added `BUNDLE_REPAIR_RETRY_INTERVAL_SECONDS` and
+  `BUNDLE_REPAIR_RETRY_BATCH_SIZE` environment variables to control the time
+  between queuing batches of bundle retries and the number of data items
+  retrieved when constructing batches of bundles to retry.
+- Added support for configuring the ar.io SDK log level via the
+  `AR_IO_SDK_LOG_LEVEL` environment variable.
+- Added a `request_chunk_total` Prometheus counter with `status`, `source` (a
+  URL) and `source_type` (`trusted` or `peer`) labels to track success/failure
+  of chunk retrieval in the Arweave network per source.
+- Added a `get_chunk_total` Prometheus metric to count chunk retrieval
+  success/failure per chunk.
+- Added `arns_cache_hit_total` and `arns_cache_miss_total` Prometheus counters
+  to track ArNS cache hits and misses for individual names respectively.
+- Added `arns_name_cache_hit_total` and `arns_name_cache_miss_total` Prometheus
+  counters to track ArNS name list cache hits and misses
+  respectively.
+- Added a `arns_resolution_duration_ms` Prometheus metric that tracks summary
+  statistics for the amount of time it takes to resolve ArNS names.
+
+### Changed
+
+- In addition to the trusted node, the Arweave network is now searched for
+  chunks by default. All chunks retrieved are verified against data roots
+  indexed from a trusted Arweave node to ensure their validity.
+- Default to a 24 hour cache TTL for the ArNS name cache. Record TTLs still
+  override this, but in cases where resolution via AO CU is slow or fails, the
+  cache will be used. In the case of slow resolution, CU based resolution will
+  proceed in the background and update the cache upon completion.
+- Switched to the `ioredis` library for better TLS support.
+- Updated minor dependency minor versions (more dependencies will be updated in
+  the next release).
+- Bundles imports will no longer be re-attempted for bundles that have already
+  been fully unbundled using the current filters if they are matched or
+  manually queued again.
+- Replaced references `docker-compose` in the docs with the more modern `docker
+  compose`.
+
+### Fixed
+
+- Ensure duplicate data item IDs are ignored when comparing counts to determine
+  if a bundle has been fully unbundled.
+- Fixed worker threads failing to shut down properly when the main process
+  stopped.
+- Ensure bundle import attempt counts are incremented when bundles are skipped
+  to avoid repeatedly attempting to import skipped bundles.
+- Use observe that correctly ensure failing gateways are penalized in the AR.IO
+  AO process.
+
 ## [Release 23] - 2025-01-13
 
 ### Added

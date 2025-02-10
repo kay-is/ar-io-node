@@ -52,6 +52,7 @@ import {
   DataBlockListValidator,
   NameBlockListValidator,
   BundleIndex,
+  BundleSaveResult,
   BundleRecord,
   ChainIndex,
   ChainOffsetIndex,
@@ -910,6 +911,14 @@ export class StandaloneSqliteDatabaseWorker {
     this.insertDataItemFn(item, maybeTxHeight);
   }
 
+  saveBundleRetries(rootTransactionId: string) {
+    const rootTxId = fromB64Url(rootTransactionId);
+    this.stmts.bundles.updateBundleRetry.run({
+      root_transaction_id: rootTxId,
+      current_timestamp: currentUnixTimestamp(),
+    });
+  }
+
   saveBundle({
     id,
     rootTransactionId,
@@ -918,17 +927,25 @@ export class StandaloneSqliteDatabaseWorker {
     indexFilter,
     dataItemCount,
     matchedDataItemCount,
+    duplicatedDataItemCount,
     queuedAt,
     skippedAt,
     unbundledAt,
     fullyIndexedAt,
-  }: BundleRecord) {
+  }: BundleRecord): BundleSaveResult {
     const idBuffer = fromB64Url(id);
     let rootTxId: Buffer | undefined;
     if (rootTransactionId != undefined) {
       rootTxId = fromB64Url(rootTransactionId);
     }
-    this.stmts.bundles.upsertBundle.run({
+
+    const {
+      unbundle_filter_id,
+      index_filter_id,
+      previous_unbundle_filter_id,
+      previous_index_filter_id,
+      last_fully_indexed_at,
+    } = this.stmts.bundles.upsertBundle.get({
       id: idBuffer,
       root_transaction_id: rootTxId,
       format_id: this.getBundleFormatId(format),
@@ -936,11 +953,20 @@ export class StandaloneSqliteDatabaseWorker {
       index_filter_id: this.getFilterId(indexFilter),
       data_item_count: dataItemCount,
       matched_data_item_count: matchedDataItemCount,
+      duplicated_data_item_count: duplicatedDataItemCount,
       queued_at: queuedAt,
       skipped_at: skippedAt,
       unbundled_at: unbundledAt,
       fully_indexed_at: fullyIndexedAt,
     });
+
+    return {
+      unbundleFilterId: unbundle_filter_id,
+      indexFilterId: index_filter_id,
+      previousUnbundleFilterId: previous_unbundle_filter_id,
+      previousIndexFilterId: previous_index_filter_id,
+      lastFullyIndexedAt: last_fully_indexed_at,
+    };
   }
 
   saveBlockAndTxs(
@@ -2456,8 +2482,8 @@ export class StandaloneSqliteDatabaseWorker {
     });
   }
 
-  getUnverifiedDataIds() {
-    const dataIds = this.stmts.data.selectUnverifiedContiguousDataIds.all();
+  getVerifiableDataIds() {
+    const dataIds = this.stmts.data.selectVerifiableContiguousDataIds.all();
     return dataIds.map((row) => toB64Url(row.id));
   }
 
@@ -2762,26 +2788,37 @@ export class StandaloneSqliteDatabase
   async stop() {
     const log = this.log.child({ method: 'stop' });
     const promises: Promise<void>[] = [];
-    WORKER_POOL_NAMES.forEach((pool) => {
-      WORKER_ROLE_NAMES.forEach((role) => {
-        this.workers[pool][role].forEach(() => {
-          promises.push(
-            new Promise((resolve, reject) => {
-              this.workQueues[pool][role].push({
-                resolve,
-                reject,
-                message: {
-                  method: 'terminate',
-                },
-              });
-              this.drainQueue();
-            }),
-          );
-        });
-      });
-    });
 
+    for (const pool of WORKER_POOL_NAMES) {
+      for (const role of WORKER_ROLE_NAMES) {
+        if (this.workers[pool][role] !== undefined) {
+          for (const _ of this.workers[pool][role]) {
+            if (
+              this.workQueues[pool][role] &&
+              typeof this.workQueues[pool][role].push === 'function'
+            ) {
+              log.debug('Creating stop job for worker', { pool, role });
+              promises.push(
+                new Promise((resolve) => {
+                  this.workQueues[pool][role].push({
+                    resolve,
+                    // by always resolving, we prevent shutdown procedure from
+                    // perpetually waiting for a response from the worker
+                    reject: resolve,
+                    message: {
+                      method: 'terminate',
+                    },
+                  });
+                }),
+              );
+              this.drainQueue();
+            }
+          }
+        }
+      }
+    }
     await Promise.all(promises);
+
     log.debug('Stopped successfully.');
   }
 
@@ -2907,7 +2944,11 @@ export class StandaloneSqliteDatabase
     return this.queueWrite('bundles', 'saveDataItem', [item]);
   }
 
-  saveBundle(bundle: BundleRecord): Promise<void> {
+  saveBundleRetries(rootTransactionId: string): Promise<void> {
+    return this.queueWrite('bundles', 'saveBundleRetries', [rootTransactionId]);
+  }
+
+  saveBundle(bundle: BundleRecord): Promise<BundleSaveResult> {
     return this.queueWrite('bundles', 'saveBundle', [bundle]);
   }
 
@@ -3210,8 +3251,8 @@ export class StandaloneSqliteDatabase
     ]);
   }
 
-  async getUnverifiedDataIds() {
-    return this.queueRead('data', 'getUnverifiedDataIds', undefined);
+  async getVerifiableDataIds() {
+    return this.queueRead('data', 'getVerifiableDataIds', undefined);
   }
 
   async getRootTxId(id: string) {
@@ -3325,9 +3366,15 @@ if (!isMainThread) {
           worker.saveDataItem(args[0]);
           parentPort?.postMessage(null);
           break;
-        case 'saveBundle':
-          worker.saveBundle(args[0]);
+        case 'saveBundleRetries':
+          worker.saveBundleRetries(args[0]);
           parentPort?.postMessage(null);
+          break;
+        case 'saveBundle':
+          {
+            const bundle = worker.saveBundle(args[0]);
+            parentPort?.postMessage(bundle);
+          }
           break;
         case 'saveBlockAndTxs':
           {
@@ -3421,9 +3468,9 @@ if (!isMainThread) {
           worker.saveNestedDataHash(args[0]);
           parentPort?.postMessage(null);
           break;
-        case 'getUnverifiedDataIds':
-          const unverifiedIds = worker.getUnverifiedDataIds();
-          parentPort?.postMessage(unverifiedIds);
+        case 'getVerifiableDataIds':
+          const ids = worker.getVerifiableDataIds();
+          parentPort?.postMessage(ids);
           break;
         case 'getRootTxId':
           const rootTxId = worker.getRootTxId(args[0]);

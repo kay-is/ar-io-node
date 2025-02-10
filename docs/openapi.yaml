@@ -1,5 +1,5 @@
 ---
-openapi: 3.0.0
+openapi: 3.1.1
 info:
   title: AR.IO Gateway
   version: 0.0.1
@@ -16,14 +16,25 @@ info:
     - indexing and querying layer one and two transactions
     - proxy for Arweave nodes serving the Arweave HTTP API
 
-    # Errors
+    ## Errors
 
     The API uses standard HTTP status codes to indicate the success or failure of the API call.
 
-    # Authentication
+    ## Authentication
 
     All inbound transactions to the Arweave network must contain a valid signature from an Arweave wallet with appropriate amount of AR tokens.  At this time, clients are not required to sign their requests for outbound data from the Arweave network.
+  license:
+    name: GNU Affero General Public License v3.0
+    identifier: AGPL-3.0-only
 tags:
+  - name: Gateway
+    description: |
+      Operations related to the AR.IO Gateway server itself, including health checks, metrics, and gateway-specific information
+  - name: Data
+    description: |
+      Core data retrieval operations for accessing transaction and data item content. Supports manifest resolution,
+      range requests, caching, and verification status. These endpoints serve as the primary interface for retrieving
+      data from the Permaweb.
   - name: Network
     description: |
       Get Arweave node info, peers and nework status
@@ -39,21 +50,21 @@ tags:
   - name: Transactions
     description: |
       Submit a new Arweave transaction or get existing transaction information
-  - name: Cache
-    description: |
-      Get data from the AR.IO Gateway cache
   - name: Chunks
     description: |
       Upload Arweave data chunks or get existing chunk offset information
+  - name: ArNS
+    description: |
+      Get data from the AR.IO Gateway Arweave Name System
   - name: Index Querying
     description: |
       Get data from the AR.IO Gateway index using GQL
-  - name: Admin
-    description: |
-      Access several password protected features and functions specific to your AR.IO Gateway.
   - name: Farcaster Frames
     description: |
       Retrieve and interact with Farcaster Frames using Arweave transactions.
+  - name: Admin
+    description: |
+      Access several password protected features and functions specific to your AR.IO Gateway.
 components:
   securitySchemes:
     bearerAuth:
@@ -62,6 +73,63 @@ components:
       bearerFormat: apiToken
       description: ADMIN_API_KEY set in your .env file.
   schemas:
+    Base64Url:
+      type: string
+      pattern: '^[A-Za-z0-9_-]+$'
+    Base64Url43:
+      type: string
+      pattern: '^[0-9a-zA-Z_-]{43}$'
+    Base64Url64:
+      type: string
+      pattern: '^[0-9a-zA-Z_-]{64}$'
+    Base64Url4364:
+      type: string
+      pattern: '^[0-9a-zA-Z_-]{43}$|^[0-9a-zA-Z_-]{64}$'
+    WinstonAmount:
+      type: string
+      pattern: '^[0-9]{1,21}$'
+    NumericString:
+      type: string
+      pattern: '^[0-9]+$'
+    IntegerOrNumericString:
+      description: A value that can be either an integer or a string representation of an integer
+      anyOf:
+        - type: integer
+        - type: string
+          pattern: '^[0-9]+$'
+    TagList:
+      type: array
+      maxItems: 2048
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+            pattern: '^[0-9a-zA-Z_-]{1,2731}$'
+          value:
+            type: string
+            pattern: '^[0-9a-zA-Z_-]{1,2731}$'
+    Owner:
+      type: string
+      pattern: '^[0-9a-zA-Z_-]{1,683}$'
+    Signature:
+      type: string
+      pattern: '^[0-9a-zA-Z_-]{1,683}$'
+    ByteRange:
+      type: string
+      pattern: '^bytes=\d*-\d*(?:,\d*-\d*)*$'
+      description: |
+        HTTP byte range specifying which parts of the data to retrieve.
+        Supports single ranges (e.g. "bytes=0-1023") and multiple ranges (e.g. "bytes=0-50,100-150").
+      example: 'bytes=0-1023'
+    CacheStatus:
+      type: string
+      enum: [HIT, MISS]
+      description: Indicates whether the data was served from cache
+    VerificationStatus:
+      type: string
+      enum: [true, false]
+      description: Indicates whether the data has been verified
     Block:
       type: object
       properties:
@@ -70,115 +138,75 @@ components:
           minItems: 2
           maxItems: 2
           items:
-            type: string
-            pattern: '^[0-9]+$'
+            $ref: '#/components/schemas/Base64Url'
         scheduled_usd_to_ar_rate:
           type: array
           minItems: 2
           maxItems: 2
           items:
-            type: string
-            pattern: '^[0-9]+$'
+            $ref: '#/components/schemas/Base64Url'
         packing_2_5_threshold:
-          type: string
-          pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/Base64Url'
         strict_data_split_threshold:
-          type: string
-          pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/NumericString'
         nonce:
-          type: string
-          # TODO restrict length (not sure about max, it depends on height)
-          pattern: '^[0-9a-zA-Z_-]+$'
+          $ref: '#/components/schemas/Base64Url'
         previous_block:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{64}$'
+          $ref: '#/components/schemas/Base64Url64'
         timestamp:
           type: integer
         last_retarget:
           type: integer
         diff:
-          anyOf:
-            - type: integer
-            - type: string
-              pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/IntegerOrNumericString'
         height:
           type: integer
         hash:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{43}$|^[0-9a-zA-Z_-]{64}$'
+          $ref: '#/components/schemas/Base64Url4364'
         txs:
           type: array
           minItems: 0
           maxItems: 1000
           items:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
         tx_root:
-          type: string
-          pattern: '^$|^[0-9a-zA-Z_-]{43}$'
+          $ref: '#/components/schemas/Base64Url43'
         tx_tree:
           type: array
           maxItems: 0
           items:
             type: string
         wallet_list:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{43}$|^[0-9a-zA-Z_-]{64}$'
+          $ref: '#/components/schemas/Base64Url4364'
         reward_addr:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{43}$'
+          $ref: '#/components/schemas/Base64Url43'
         tags:
-          type: array
-          maxItems: 2048
-          items:
-            type: object
-            properties:
-              name:
-                type: string
-                pattern: '^[0-9a-zA-Z_-]{1,2731}$'
-              value:
-                type: string
-                pattern: '^[0-9a-zA-Z_-]{1,2731}$'
+          $ref: '#/components/schemas/TagList'
         reward_pool:
-          anyOf:
-            - type: integer
-            - type: string
-              # TODO add length restriction
-              pattern: '^[0-9]+$'
+          # TODO add length restriction
+          $ref: '#/components/schemas/IntegerOrNumericString'
         weave_size:
-          anyOf:
-            - type: integer
-            - type: string
-              pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/IntegerOrNumericString'
         block_size:
-          anyOf:
-            - type: integer
-            - type: string
-              pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/IntegerOrNumericString'
         cumulative_diff:
-          type: string
-          pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/NumericString'
         hash_list_merkle:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{64}$'
+          $ref: '#/components/schemas/Base64Url64'
         poa:
           type: object
           properties:
             option:
-              type: string
-              pattern: '^[0-9]+$'
+              $ref: '#/components/schemas/NumericString'
             tx_path:
-              type: string
               # TODO specify length
-              pattern: '^[0-9a-zA-Z_-]*$'
+              $ref: '#/components/schemas/Base64Url'
             data_path:
-              type: string
               # TODO specify length
-              pattern: '^[0-9a-zA-Z_-]*$'
+              $ref: '#/components/schemas/Base64Url'
             chunk:
-              type: string
               # TODO specify length
-              pattern: '^[0-9a-zA-Z_-]*$'
+              $ref: '#/components/schemas/Base64Url'
       required:
         - nonce
         - previous_block
@@ -201,18 +229,15 @@ components:
       type: object
       properties:
         tx_path:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]+$'
+          $ref: '#/components/schemas/Base64Url'
         packing:
           type: string
           # TODO add all types
           pattern: '^unpacked$'
         data_path:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]+$'
+          $ref: '#/components/schemas/Base64Url'
         chunk:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]+$'
+          $ref: '#/components/schemas/Base64Url'
       required:
         - tx_path
         - packing
@@ -224,50 +249,30 @@ components:
         format:
           type: integer
         id:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{43}$'
+          $ref: '#/components/schemas/Base64Url43'
         last_tx:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{43}|[0-9a-zA-Z_-]{64}$'
+          $ref: '#/components/schemas/Base64Url4364'
         owner:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{1,683}$'
+          $ref: '#/components/schemas/Owner'
         tags:
-          type: array
-          maxItems: 2048
-          items:
-            type: object
-            properties:
-              name:
-                type: string
-                pattern: '^[0-9a-zA-Z_-]{1,2731}$'
-              value:
-                type: string
-                pattern: '^[0-9a-zA-Z_-]{1,2731}$'
+          $ref: '#/components/schemas/TagList'
         target:
-          type: string
-          pattern: '^$|^[0-9a-zA-Z_-]{43}$'
+          $ref: '#/components/schemas/Base64Url43'
         quantity:
-          type: string
-          pattern: '^[0-9]{1,21}$'
+          $ref: '#/components/schemas/WinstonAmount'
         data:
-          # TODO determine limit (if any)
-          type: string
-          pattern: '^[0-9a-zA-Z_-]*$'
+          $ref: '#/components/schemas/Base64Url'
         data_tree:
           type: array
           items:
             # TODO determine contents of array (is this just for v1?)
             type: string
         data_root:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]*$'
+          $ref: '#/components/schemas/Base64Url'
         reward:
-          type: string
-          pattern: '^[0-9]{1,21}$'
+          $ref: '#/components/schemas/WinstonAmount'
         signature:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{1,683}$'
+          $ref: '#/components/schemas/Signature'
       required:
         - format
         - id
@@ -285,11 +290,9 @@ components:
       type: object
       properties:
         size:
-          type: string
-          pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/NumericString'
         offset:
-          type: string
-          pattern: '^[0-9]+$'
+          $ref: '#/components/schemas/NumericString'
       required:
         - size
         - offset
@@ -299,8 +302,7 @@ components:
         block_height:
           type: integer
         block_indep_hash:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{64}$'
+          $ref: '#/components/schemas/Base64Url64'
         number_of_confirmations:
           type: integer
       required:
@@ -310,8 +312,7 @@ components:
     Mempool:
       type: array
       items:
-        type: string
-        pattern: '^[0-9a-zA-Z_-]{43}$'
+        $ref: '#/components/schemas/Base64Url43'
     NetworkInfo:
       type: object
       properties:
@@ -322,8 +323,7 @@ components:
         release:
           type: integer
         current:
-          type: string
-          pattern: '^[0-9a-zA-Z_-]{64}$'
+          $ref: '#/components/schemas/Base64Url64'
         blocks:
           type: integer
         peers:
@@ -349,7 +349,493 @@ components:
     Height:
       type: string
       pattern: '^[0-9]{16}$'
+    ArNSResolution:
+      type: object
+      description: Response containing ArNS name resolution details
+      properties:
+        txId:
+          $ref: '#/components/schemas/Base64Url43'
+          description: The resolved transaction ID
+        ttlSeconds:
+          type: integer
+          description: Time-to-live in seconds for this resolution
+        processId:
+          type: string
+          description: AO process ID
+        resolvedAt:
+          type: integer
+          description: Unix timestamp when the name was resolved
+        index:
+          type: integer
+          description: Index of the name in the sorted list of names
+        limit:
+          type: integer
+          description: The undername limit for the base ArNS name
+      required:
+        - txId
+        - ttlSeconds
+        - processId
+        - resolvedAt
+        - index
+        - limit
+  requestBodies:
+    QueueTxRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              id:
+                $ref: '#/components/schemas/Base64Url43'
+                description: TX ID of the transaction you would like to prioritize.
+          examples:
+            example1:
+              value:
+                id: '3lyxgbgEvqNSvJrTX2J7CfRychUD5KClFhhVLyTPNCQ'
+  responses:
+    MissingId:
+      description: Bad Request. Id is required.
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: "Must provide 'id'"
+    MissingIdOrBypassFilter:
+      description: Bad Request. The request is missing required parameters.
+      content:
+        text/plain:
+          schema:
+            type: string
+          examples:
+            missingId:
+              summary: ID is required
+              value: "Must provide 'id'"
+            missingFilter:
+              summary: bypassFilter must be a boolean
+              value: "'bypassFilter' must be a boolean"
+    QueueTxSuccess:
+      description: Successful operation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: 'TX queued'
+            required:
+              - message
+    Unauthorized:
+      description: Unauthorized
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: 'Unauthorized'
+    ServerError:
+      description: Internal Server Error
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: 'Internal Server Error'
+
 paths:
+  # Gateway
+  '/ar-io/healthcheck':
+    get:
+      tags: [Gateway]
+      summary: Health check endpoint
+      description: Get the current health status of the AR.IO Gateway.
+      responses:
+        '200':
+          description: Health check response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, unhealthy]
+                    description: Current health status of the gateway
+                  uptime:
+                    type: number
+                    description: Process uptime in seconds
+                  date:
+                    type: string
+                    format: date-time
+                    description: Current server timestamp
+                  reasons:
+                    type: array
+                    items:
+                      type: string
+                    description: Array of reasons if status is unhealthy
+                required:
+                  - status
+                  - uptime
+                  - date
+  '/ar-io/info':
+    get:
+      tags: [Gateway]
+      summary: Get AR.IO Gateway information
+      description: |
+        Returns information about the AR.IO Gateway, including:
+        - Gateway wallet address
+        - Process ID
+        - ANS-104 filter configurations
+        - Supported manifest versions
+        - Gateway software release version
+      responses:
+        '200':
+          description: Gateway information response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    $ref: '#/components/schemas/Base64Url43'
+                    description: Gateway wallet address
+                  processId:
+                    $ref: '#/components/schemas/Base64Url43'
+                  ans104UnbundleFilter:
+                    type: object
+                    description: Configuration for ANS-104 unbundling filter
+                  ans104IndexFilter:
+                    type: object
+                    description: Configuration for ANS-104 indexing filter
+                  supportedManifestVersions:
+                    type: array
+                    description: List of supported manifest versions
+                    items:
+                      type: string
+                      enum: ['0.1.0', '0.2.0']
+                  release:
+                    type: string
+                    description: Gateway software release version
+                required:
+                  - processId
+                  - supportedManifestVersions
+                  - release
+  '/ar-io/__gateway_metrics':
+    get:
+      tags: [Gateway]
+      summary: Get Prometheus metrics
+      description: |
+        Returns metrics in Prometheus format for monitoring the Gateway's performance and status.
+        These metrics include various counters, gauges, and histograms tracking:
+        - HTTP request statistics
+        - Transaction processing metrics
+        - System resource usage
+        - Cache performance
+        - Bundle processing statistics
+      responses:
+        '200':
+          description: Prometheus metrics response
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Metrics in Prometheus format
+                example: |
+                  # HELP errors_total Total error count
+                  # TYPE errors_total counter
+                  errors_total 0
+
+                  # HELP uncaught_exceptions_total Count of uncaught exceptions
+                  # TYPE uncaught_exceptions_total counter
+                  uncaught_exceptions_total 0
+
+  # Data
+  '/{txId}':
+    get:
+      tags: [Data]
+      summary: Get transaction or data item content
+      description: |
+        Get the content of a specified transaction or data item. Supports manifest path resolution,
+        range requests, and returns various informational headers about data verification and caching status.
+      parameters:
+        - name: txId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Base64Url43'
+        - name: Range
+          in: header
+          required: false
+          schema:
+            $ref: '#/components/schemas/ByteRange'
+          description: Byte range(s) to retrieve
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=2592000, immutable
+            Content-Length:
+              schema:
+                type: string
+                example: 1024
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+            X-Cache:
+              schema:
+                $ref: '#/components/schemas/CacheStatus'
+                example: HIT
+            X-AR-IO-Verified:
+              schema:
+                $ref: '#/components/schemas/VerificationStatus'
+                example: true
+            X-AR-IO-Digest:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            ETag:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            X-AR-IO-Root-Transaction-Id:
+              schema:
+                $ref: '#/components/schemas/Base64Url43'
+                description: For data items, the root transaction ID
+                example: '283VjqeZG65tPI6V0e-gucoHCaEBPL41_cI8rXVRbMc'
+            X-AR-IO-Hops:
+              schema:
+                type: integer
+                example: 1
+        '206':
+          description: Partial content for range requests
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                example: bytes 0-1023/146515
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+        '301':
+          description: Redirect for manifest paths without trailing slash
+        '404':
+          description: Data not found or blocked
+        '416':
+          description: Range not satisfiable
+    head:
+      tags: [Data]
+      summary: Get transaction or data item headers
+      description: |
+        Get the headers for a specified transaction or data item without the content.
+        Returns the same headers as the GET request.
+      parameters:
+        - name: txId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Base64Url43'
+        - name: Range
+          in: header
+          required: false
+          schema:
+            $ref: '#/components/schemas/ByteRange'
+          description: Byte range(s) to check
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=2592000, immutable
+            Content-Length:
+              schema:
+                type: string
+                example: 1024
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+            X-Cache:
+              schema:
+                $ref: '#/components/schemas/CacheStatus'
+                example: HIT
+            X-AR-IO-Verified:
+              schema:
+                $ref: '#/components/schemas/VerificationStatus'
+                example: true
+            X-AR-IO-Digest:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            ETag:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            X-AR-IO-Root-Transaction-Id:
+              schema:
+                $ref: '#/components/schemas/Base64Url43'
+                description: For data items, the root transaction ID
+                example: '283VjqeZG65tPI6V0e-gucoHCaEBPL41_cI8rXVRbMc'
+            X-AR-IO-Hops:
+              schema:
+                type: integer
+                example: 1
+  '/raw/{txId}':
+    get:
+      tags: [Data]
+      summary: Get raw transaction data
+      description: Get the raw content of a specified transaction without manifest resolution
+      parameters:
+        - name: txId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Base64Url43'
+        - name: Range
+          in: header
+          required: false
+          schema:
+            $ref: '#/components/schemas/ByteRange'
+          description: Byte range(s) to retrieve
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=2592000, immutable
+            Content-Length:
+              schema:
+                type: string
+                example: 1024
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+            X-Cache:
+              schema:
+                $ref: '#/components/schemas/CacheStatus'
+                example: HIT
+            X-AR-IO-Verified:
+              schema:
+                $ref: '#/components/schemas/VerificationStatus'
+                example: true
+            X-AR-IO-Digest:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            ETag:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            X-AR-IO-Root-Transaction-Id:
+              schema:
+                $ref: '#/components/schemas/Base64Url43'
+                description: For data items, the root transaction ID
+                example: '283VjqeZG65tPI6V0e-gucoHCaEBPL41_cI8rXVRbMc'
+            X-AR-IO-Hops:
+              schema:
+                type: integer
+                example: 1
+        '206':
+          description: Partial content for range requests
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                example: bytes 0-1023/146515
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+        '404':
+          description: Data not found or blocked
+        '416':
+          description: Range not satisfiable
+    head:
+      tags: [Data]
+      summary: Get raw transaction data headers
+      description: Get the headers for raw transaction data without manifest resolution
+      parameters:
+        - name: txId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Base64Url43'
+        - name: Range
+          in: header
+          required: false
+          schema:
+            $ref: '#/components/schemas/ByteRange'
+          description: Byte range(s) to check
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=2592000, immutable
+            Content-Length:
+              schema:
+                type: string
+                example: 1024
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+            X-Cache:
+              schema:
+                $ref: '#/components/schemas/CacheStatus'
+                example: HIT
+            X-AR-IO-Verified:
+              schema:
+                $ref: '#/components/schemas/VerificationStatus'
+                example: true
+            X-AR-IO-Digest:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            ETag:
+              schema:
+                type: string
+                example: '4ROTs2lTPAKbr8Y41WrjHu-2q-7S-m-yTuO7fAUzZI4'
+            X-AR-IO-Root-Transaction-Id:
+              schema:
+                $ref: '#/components/schemas/Base64Url43'
+                description: For data items, the root transaction ID
+                example: '283VjqeZG65tPI6V0e-gucoHCaEBPL41_cI8rXVRbMc'
+            X-AR-IO-Hops:
+              schema:
+                type: integer
+                example: 1
+        '404':
+          description: Data not found or blocked
+        '416':
+          description: Range not satisfiable for HEAD request
+
   # Network and Node Status
   '/':
     get:
@@ -403,13 +889,19 @@ paths:
             application/json:
               schema:
                 '$ref': '#/components/schemas/Height'
-  # "/metrics"
-  # "/tx_anchor"
-  # "/hash_list"
-  # "/data_sync_record"
-  # "/data_sync_record/{start}/{limit}""
-  # "/time"
-  # "/sync_buckets"
+  '/tx_anchor':
+    get:
+      tags: [Network]
+      summary: Get the current transaction anchor.
+      description: Get the current transaction anchor of the Arweave network.
+      responses:
+        '200':
+          description: |-
+            200 response
+          content:
+            text/plain:
+              schema:
+                '$ref': '#/components/schemas/Base64Url43'
 
   # Pricing
   '/price/{size}':
@@ -422,15 +914,13 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9]+$'
+            $ref: '#/components/schemas/NumericString'
       responses:
         '200':
           description: |-
             Successful operation.
           content:
-            # TODO text/plain ?
-            text/html:
+            text/plain:
               schema:
                 type: integer
   '/price/{size}/target':
@@ -444,8 +934,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9]+$'
+            $ref: '#/components/schemas/NumericString'
       responses:
         '200':
           description: |-
@@ -466,15 +955,13 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
       responses:
         '200':
           description: |-
             Successful operation.
           content:
-            # TODO text/plain ?
-            text/html:
+            text/plain:
               schema:
                 type: integer
   '/wallet/{address}/last_tx':
@@ -487,18 +974,15 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
       responses:
         '200':
           description: |-
             Successful operation.
           content:
-            # TODO text/plain ?
-            text/html:
+            text/plain:
               schema:
-                type: string
-                pattern: '^$|^[0-9a-zA-Z_-]{43}$'
+                $ref: '#/components/schemas/Base64Url43'
 
   # Blocks
   '/current_block':
@@ -524,8 +1008,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9]+$'
+            $ref: '#/components/schemas/NumericString'
       responses:
         '200':
           description: |-
@@ -544,8 +1027,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{64}$'
+            $ref: '#/components/schemas/Base64Url64'
       responses:
         '200':
           description: |-
@@ -593,8 +1075,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
       responses:
         '200':
           description: |-
@@ -613,8 +1094,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
       responses:
         '200':
           description: |-
@@ -633,8 +1113,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
       responses:
         '200':
           description: |-
@@ -645,28 +1124,6 @@ paths:
                 '$ref': '#/components/schemas/TransactionStatus'
   # "/tx/{txId}/field"
   # "/unconfirmed_tx/{txId}"
-
-  # Cache
-  '/{txId}':
-    get:
-      tags: [Cache]
-      summary: Get transaction.
-      description: Get the content of a specified transaction.
-      parameters:
-        - name: txId
-          in: path
-          required: true
-          schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
-      responses:
-        '200':
-          description: |-
-            Successful operation.
-          content:
-            application/json:
-              schema:
-                '$ref': '#/components/schemas/Transaction'
 
   # Chunks
   '/chunk/{offset}':
@@ -690,7 +1147,149 @@ paths:
                 '$ref': '#/components/schemas/Chunk'
 
   # Index
-  # "/graphql"
+  '/graphql':
+    post:
+      tags: [Index Querying]
+      summary: Query indexed data using GraphQL
+      description: |
+        GraphQL endpoint for querying indexed transaction and block data. Supports:
+        - Transaction queries by ID, owner, recipient, tags, and bundle
+        - Block queries by ID and height
+        - Pagination and sorting
+        - Rich metadata including sizes, content types, and signatures
+
+        See the GraphQL Playground at `/graphql` for full schema documentation and interactive querying.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: GraphQL query string
+                variables:
+                  type: object
+                  description: Query variables
+              example:
+                query: |
+                  query {
+                    transaction(
+                      id: "D6I-Ke9oLg7sU_PS4oADQmnyFRa1jj2Zs1DP9BltrFs"
+                    ) {
+                      signature
+                      owner {
+                        address
+                      }
+                      bundledIn {
+                        id
+                      }
+                      block {
+                        height
+                      }
+                    }
+                  }
+      responses:
+        '200':
+          description: Successful GraphQL response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: object
+                    description: Query results
+                    example: |
+                      {
+                        "transaction": {
+                          "signature": "4wh6PDJH6eyCKAWZoW26T0qt5NNjnVgyPjLs5HDR7fYgOyzEZF8FyIJiz01IRVvmXC9WZKvy2uLGiIdW4GtUNhs",
+                          "owner": {
+                            "address": "WbE3R_GcAalEP-VonRpL2P5TG30PJRA1-Tj20E_xIK0"
+                          },
+                          "bundledIn": {
+                            "id": "yU5ilscWlDecDhUmNcd24zqe9HmNZ31h31BxC_VcXIM"
+                          },
+                          "block": null
+                        }
+                      }
+                  errors:
+                    type: array
+                    description: Query errors if any
+                    items:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                        locations:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              line:
+                                type: integer
+                              column:
+                                type: integer
+                        path:
+                          type: array
+                          items:
+                            type: string
+        '400':
+          description: Invalid GraphQL query
+        '500':
+          description: Server error
+
+  # ArNS
+  '/ar-io/resolver/{name}':
+    get:
+      tags: [ArNS]
+      summary: Get ArNS name resolution.
+      description: Get detailed information of a specified ArNS name.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful resolution of ArNS name
+          headers:
+            x-arns-resolved-id:
+              schema:
+                $ref: '#/components/schemas/Base64Url43'
+              description: The resolved transaction ID
+            x-arns-ttl-seconds:
+              schema:
+                type: string
+              description: Time-to-live in seconds for this resolution
+            x-arns-process-id:
+              schema:
+                type: string
+              description: AO process ID
+            x-arns-resolved-at:
+              schema:
+                type: string
+              description: Unix timestamp when the name was resolved
+            x-arns-record-index:
+              schema:
+                type: number
+              description: Index of the name in the sorted list of names
+            x-arns-undername-limit:
+              schema:
+                type: number
+              description: The undername limit for the base ArNS name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArNSResolution'
+        '404':
+          description: ArNS name not found.
 
   # Admin
   '/ar-io/admin/debug':
@@ -713,27 +1312,112 @@ paths:
       description: Stage a specific TX ID as priority for your Gateway to locate and index. This will trigger and queue bundle processing if the transaction is a bundle, and your Gateway is configured to unbundle and index.
       operationId: adminQueueTx
       requestBody:
+        $ref: '#/components/requestBodies/QueueTxRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/QueueTxSuccess'
+        '400':
+          $ref: '#/components/responses/MissingId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+        - bearerAuth: []
+  '/ar-io/admin/queue-bundle':
+    post:
+      tags: [Admin]
+      summary: Queue a bundle for indexing, bypassing any filter settings by default.
+      description: Queue a bundle for indexing, bypassing any filter settings by default.
+      operationId: adminQueueBundle
+      requestBody:
+        $ref: '#/components/requestBodies/QueueTxRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/QueueTxSuccess'
+        '400':
+          $ref: '#/components/responses/MissingIdOrBypassFilter'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+      security:
+        - bearerAuth: []
+  '/ar-io/admin/queue-data-item':
+    post:
+      tags: [Admin]
+      summary: Queue data items for indexing
+      description: |
+        Queue one or more data items for indexing. This endpoint
+        accepts an array of data item headers and prioritizes them for processing.
+      operationId: adminQueueDataItem
+      security:
+        - bearerAuth: []
+      requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                id:
-                  type: string
-                  pattern: '^[0-9a-zA-Z_-]{43}$'
-                  description: TX ID of the transaction you would like to prioritize.
-            examples:
-              example1:
-                value:
-                  id: '3lyxgbgEvqNSvJrTX2J7CfRychUD5KClFhhVLyTPNCQ'
+              type: array
+              items:
+                type: object
+                properties:
+                  data_size:
+                    type: integer
+                    description: Size of the data item in bytes
+                  id:
+                    $ref: '#/components/schemas/Base64Url43'
+                    description: Data item ID
+                  owner:
+                    $ref: '#/components/schemas/Owner'
+                    Description: Data item signer's public key
+                  owner_address:
+                    $ref: '#/components/schemas/Base64Url43'
+                    description: Normalized address
+                  signature:
+                    $ref: '#/components/schemas/Signature'
+                    description: Data item signature
+                  tags:
+                    $ref: '#/components/schemas/TagList'
+                    description: Optional tags associated with the data item
+                  content_type:
+                    type: string
+                    description: Optional content type of the data item
+                  target:
+                    $ref: '#/components/schemas/Base64Url43'
+                    description: Optional target address
+                  anchor:
+                    $ref: '#/components/schemas/Base64Url43'
+                    description: Optional anchor
+                required:
+                  - data_size
+                  - id
+                  - owner
+                  - owner_address
+                  - signature
+              minItems: 1
       responses:
         '200':
-          description: Successful operation
+          description: Data items successfully queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 'Data item(s) queued'
+        '400':
+          description: Invalid request body
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'Must provide array of data item headers'
         '401':
-          description: Unauthorized, API key likely incorrect.
-      security:
-        - bearerAuth: []
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
   '/ar-io/admin/block-data':
     put:
       tags: [Admin]
@@ -825,6 +1509,161 @@ paths:
           description: Unauthorized, API key likely incorrect.
       security:
         - bearerAuth: []
+  '/ar-io/admin/export-parquet':
+    post:
+      tags: [Admin]
+      summary: Export data to Parquet format
+      description: |
+        Initiates an export of data to Parquet format files. This process runs in the background
+        and exports data for the specified block height range.
+      operationId: adminExportParquet
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                outputDir:
+                  type: string
+                  description: Directory in the server where Parquet files will be saved
+                startHeight:
+                  type: integer
+                  minimum: 0
+                  description: Starting block height for the export
+                endHeight:
+                  type: integer
+                  minimum: 0
+                  description: Ending block height for the export
+                maxFileRows:
+                  type: integer
+                  minimum: 0
+                  description: Maximum number of rows per Parquet file
+              required:
+                - outputDir
+                - startHeight
+                - endHeight
+                - maxFileRows
+      responses:
+        '200':
+          description: Export process started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 'Parquet export started'
+        '400':
+          description: Invalid parameters provided
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  '/ar-io/admin/export-parquet/status':
+    get:
+      tags: [Admin]
+      summary: Get Parquet export status
+      description: Returns the current status of the Parquet export process
+      operationId: adminExportParquetStatus
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current export status
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Current status of the export process
+                properties:
+                  status:
+                    type: string
+                    enum: [not_started, running, completed, errored]
+                    description: Current status of the export process
+                  outputDir:
+                    type: string
+                    description: Directory where Parquet files are being saved
+                  startHeight:
+                    type: integer
+                    description: Starting block height of the export
+                  endHeight:
+                    type: integer
+                    description: Ending block height of the export
+                  maxFileRows:
+                    type: integer
+                    description: Maximum number of rows per Parquet file
+                  durationInSeconds:
+                    type: number
+                    description: Duration of the export process in seconds
+                  endTime:
+                    type: string
+                    format: date-time
+                    description: ISO timestamp when the export completed
+                  endTimestamp:
+                    type: integer
+                    description: Unix timestamp when the export completed
+                  error:
+                    type: string
+                    description: Error message if the export failed
+                required:
+                  - status
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  '/ar-io/admin/prune-stable-data-items':
+    post:
+      tags: [Admin]
+      summary: Prune stable data items
+      description: |
+        Removes stable data items from the database that were indexed before the specified timestamp.
+        This helps manage database size by removing older, stable data items.
+      operationId: adminPruneStableDataItems
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                indexedAtThreshold:
+                  type: integer
+                  minimum: 0
+                  description: Unix timestamp - data items indexed before this time will be pruned
+              required:
+                - indexedAtThreshold
+            example:
+              indexedAtThreshold: 1677721600
+      responses:
+        '200':
+          description: Data items successfully pruned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 'Stable data items pruned successfully'
+        '400':
+          description: Invalid indexedAtThreshold parameter
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'Invalid indexedAtThreshold - must be a positive integer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  # Farcaster
   '/local/farcaster/frame/{txId}':
     get:
       tags: [Farcaster Frames]
@@ -836,8 +1675,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
       responses:
         '200':
           description: |-
@@ -856,8 +1694,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            pattern: '^[0-9a-zA-Z_-]{43}$'
+            $ref: '#/components/schemas/Base64Url43'
       responses:
         '200':
           description: |-

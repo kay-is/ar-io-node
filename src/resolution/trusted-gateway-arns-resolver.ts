@@ -23,6 +23,8 @@ import { isValidDataId } from '../lib/validation.js';
 import { NameResolution, NameResolver } from '../types.js';
 
 export const DEFAULT_ARNS_TTL_SECONDS = 60 * 15; // 15 minutes
+export const DEFAULT_ARNS_UNDERNAME_LIMIT = 10;
+export const DEFAULT_ARNS_UNDERNAME_INDEX = 0;
 
 export class TrustedGatewayArNSResolver implements NameResolver {
   private log: winston.Logger;
@@ -39,7 +41,7 @@ export class TrustedGatewayArNSResolver implements NameResolver {
     this.trustedGatewayUrl = trustedGatewayUrl;
   }
 
-  async resolve(name: string): Promise<NameResolution> {
+  async resolve({ name }: { name: string }): Promise<NameResolution> {
     this.log.info('Resolving name...', { name });
     try {
       const nameUrl = this.trustedGatewayUrl.replace('__NAME__', name);
@@ -56,6 +58,12 @@ export class TrustedGatewayArNSResolver implements NameResolver {
       const ttl =
         parseInt(response.headers[headerNames.arnsTtlSeconds.toLowerCase()]) ||
         DEFAULT_ARNS_TTL_SECONDS;
+      const limit =
+        parseInt(response.headers[headerNames.arnsLimit.toLowerCase()]) ||
+        DEFAULT_ARNS_UNDERNAME_LIMIT;
+      const index =
+        parseInt(response.headers[headerNames.arnsIndex.toLowerCase()]) ||
+        DEFAULT_ARNS_UNDERNAME_INDEX;
       if (isValidDataId(resolvedId)) {
         this.log.info('Resolved name', { name, nameUrl, resolvedId, ttl });
         return {
@@ -64,6 +72,8 @@ export class TrustedGatewayArNSResolver implements NameResolver {
           resolvedAt: Date.now(),
           processId,
           ttl,
+          limit,
+          index,
         };
       } else {
         this.log.warn('Invalid resolved data ID', {
@@ -71,6 +81,8 @@ export class TrustedGatewayArNSResolver implements NameResolver {
           nameUrl,
           resolvedId,
           ttl,
+          limit,
+          index,
         });
       }
     } catch (error: any) {
@@ -87,6 +99,8 @@ export class TrustedGatewayArNSResolver implements NameResolver {
       resolvedAt: undefined,
       ttl: undefined,
       processId: undefined,
+      limit: undefined,
+      index: undefined,
     };
   }
 }

@@ -16,12 +16,14 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 import winston from 'winston';
+import pTimeout from 'p-timeout';
 import { NameResolution, NameResolver } from '../types.js';
 import * as metrics from '../metrics.js';
 import { KvArNSResolutionStore } from '../store/kv-arns-name-resolution-store.js';
 import { KvArNSRegistryStore } from '../store/kv-arns-base-name-store.js';
 import { ArNSNamesCache } from './arns-names-cache.js';
 import { AoARIORead } from '@ar.io/sdk';
+import * as config from '../config.js';
 
 export class CompositeArNSResolver implements NameResolver {
   private log: winston.Logger;
@@ -34,6 +36,10 @@ export class CompositeArNSResolver implements NameResolver {
       }
     | undefined;
   private arnsNamesCache: ArNSNamesCache;
+  private pendingResolutions: Record<
+    string,
+    Promise<NameResolution | undefined> | undefined
+  > = {};
 
   constructor({
     log,
@@ -63,7 +69,7 @@ export class CompositeArNSResolver implements NameResolver {
     });
   }
 
-  async resolve(name: string): Promise<NameResolution> {
+  async resolve({ name }: { name: string }): Promise<NameResolution> {
     this.log.info('Resolving name...', { name, overrides: this.overrides });
     let resolution: NameResolution | undefined;
 
@@ -76,24 +82,56 @@ export class CompositeArNSResolver implements NameResolver {
         resolvedAt: undefined,
         ttl: undefined,
         processId: undefined,
+        limit: undefined,
+        index: undefined,
       };
     }
 
     try {
-      // check if our base name is in our arns names cache, this triggers a debounce with a ttl dependent on if it's in the cache or not
-      const baseNameInCache =
-        await this.arnsNamesCache.getCachedArNSBaseName(baseName);
+      // start name list request before checking cache so that the name list
+      // stays fresh even when there are cache hits
+      const baseNameInCachePromise = this.arnsNamesCache
+        .getCachedArNSBaseName(baseName)
+        .catch((error: any) => {
+          this.log.error('Error getting base name from cache: ', {
+            message: error.message,
+            stack: error.stack,
+            baseName,
+          });
+          return undefined;
+        });
 
-      if (!baseNameInCache) {
-        this.log.warn('Base name not found in ArNS names cache', { name });
-        return {
-          name,
-          resolvedId: undefined,
-          resolvedAt: undefined,
-          ttl: undefined,
-          processId: undefined,
-        };
-      }
+      // Make a resolution function that can be called both on cache hits (when
+      // the refresh interval is past) and when we have a cache miss
+      const resolveName = async () => {
+        for (const resolver of this.resolvers) {
+          try {
+            this.log.info('Attempting to resolve name with resolver', {
+              name,
+            });
+            const resolution = await resolver.resolve({
+              name,
+              baseArNSRecord: await baseNameInCachePromise,
+            });
+            if (resolution.resolvedAt !== undefined) {
+              this.resolutionCache.set(
+                name,
+                Buffer.from(JSON.stringify(resolution)),
+              );
+              this.log.info('Resolved name', { name, resolution });
+
+              return resolution;
+            }
+          } catch (error: any) {
+            this.log.error('Error resolving name with resolver', {
+              resolver,
+              message: error.message,
+              stack: error.stack,
+            });
+          }
+        }
+        return undefined;
+      };
 
       // check if our resolution cache contains the FULL name
       const cachedResolutionBuffer = await this.resolutionCache.get(name);
@@ -110,6 +148,16 @@ export class CompositeArNSResolver implements NameResolver {
           ttlSeconds !== undefined &&
           cachedResolution.resolvedAt + ttlSeconds * 1000 > Date.now()
         ) {
+          // Resolve again in the background to refresh cache if TTL is close
+          // to expiring
+          if (
+            // Ensure only one resolution is in-flight at a time
+            !this.pendingResolutions[name] &&
+            cachedResolution.resolvedAt + ttlSeconds * 1000 - Date.now() <
+              config.ARNS_ANT_STATE_CACHE_HIT_REFRESH_WINDOW_SECONDS
+          ) {
+            this.pendingResolutions[name] = resolveName();
+          }
           metrics.arnsCacheHitCounter.inc();
           this.log.info('Cache hit for arns name', { name });
           return cachedResolution;
@@ -118,30 +166,33 @@ export class CompositeArNSResolver implements NameResolver {
       metrics.arnsCacheMissCounter.inc();
       this.log.info('Cache miss for arns name', { name });
 
-      for (const resolver of this.resolvers) {
-        try {
-          this.log.info('Attempting to resolve name with resolver', {
-            type: resolver.constructor.name,
-            name,
-          });
-          const resolution = await resolver.resolve(name);
-          if (resolution.resolvedAt !== undefined) {
-            this.resolutionCache.set(
-              name,
-              Buffer.from(JSON.stringify(resolution)),
-            );
-            this.log.info('Resolved name', { name, resolution });
-            return resolution;
-          }
-        } catch (error: any) {
-          this.log.error('Error resolving name with resolver', {
-            resolver,
-            message: error.message,
-            stack: error.stack,
-          });
-        }
+      if (!(await baseNameInCachePromise)) {
+        this.log.warn('Base name not found in ArNS names cache', { name });
+        metrics.arnsNameCacheMissCounter.inc();
+        return {
+          name,
+          resolvedId: undefined,
+          resolvedAt: undefined,
+          ttl: undefined,
+          processId: undefined,
+          limit: undefined,
+          index: undefined,
+        };
       }
-      this.log.warn('Unable to resolve name against all resolvers', { name });
+
+      // Ensure that we always use pending resolutions
+      this.pendingResolutions[name] ||= resolveName();
+      // Fallback to cached resolution if something goes wrong
+      resolution = await (resolution
+        ? pTimeout(this.pendingResolutions[name], {
+            milliseconds: config.ARNS_CACHED_RESOLUTION_FALLBACK_TIMEOUT_MS,
+            fallback: () => resolution,
+          })
+        : this.pendingResolutions[name]);
+
+      if (!resolution) {
+        this.log.warn('Unable to resolve name against all resolvers', { name });
+      }
     } catch (error: any) {
       this.log.error('Error resolving name:', {
         name,
@@ -149,6 +200,9 @@ export class CompositeArNSResolver implements NameResolver {
         stack: error.stack,
       });
     }
+
+    // Ensure the pending resolution is cleaned up
+    this.pendingResolutions[name] = undefined;
 
     // return the resolution if it exists, otherwise return an empty resolution
     return (
@@ -158,6 +212,8 @@ export class CompositeArNSResolver implements NameResolver {
         resolvedAt: undefined,
         ttl: undefined,
         processId: undefined,
+        limit: undefined,
+        index: undefined,
       }
     );
   }

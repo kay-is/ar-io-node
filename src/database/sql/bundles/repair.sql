@@ -19,7 +19,7 @@ FROM (
       b.matched_data_item_count IS NULL
       OR b.matched_data_item_count > 0
     )
-  ORDER BY b.import_attempt_count, b.last_queued_at ASC
+  ORDER BY b.retry_attempt_count, b.last_retried_at ASC
   LIMIT @limit
 )
 ORDER BY RANDOM()
@@ -31,14 +31,13 @@ SET
   last_fully_indexed_at = @fully_indexed_at
 WHERE matched_data_item_count IS NOT NULL
   AND matched_data_item_count > 0
-  AND EXISTS (
-    SELECT 1
+  AND (
+    SELECT COUNT(*)
     FROM bundle_data_items bdi
     WHERE bdi.parent_id = bundles.id
       AND bdi.filter_id = bundles.index_filter_id
-    GROUP BY bdi.parent_id
-    HAVING COUNT(*) = bundles.matched_data_item_count
-  ) AND last_fully_indexed_at IS NULL
+  ) = bundles.matched_data_item_count
+  AND last_fully_indexed_at IS NULL;
 
 -- updateForFilterChange
 UPDATE bundles

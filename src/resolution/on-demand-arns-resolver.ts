@@ -19,7 +19,15 @@ import winston from 'winston';
 
 import { isValidDataId } from '../lib/validation.js';
 import { NameResolution, NameResolver } from '../types.js';
-import { ANT, AoClient, AoARIORead, AOProcess, ARIO } from '@ar.io/sdk';
+import {
+  ANT,
+  AOProcess,
+  ARIO,
+  AoARIORead,
+  AoArNSNameDataWithName,
+  AoClient,
+  sortANTRecords,
+} from '@ar.io/sdk';
 import * as config from '../config.js';
 import { connect } from '@permaweb/aoconnect';
 import CircuitBreaker from 'opossum';
@@ -80,7 +88,13 @@ export class OnDemandArNSResolver implements NameResolver {
     metrics.circuitBreakerMetrics.add(this.aoCircuitBreaker);
   }
 
-  async resolve(name: string): Promise<NameResolution> {
+  async resolve({
+    name,
+    baseArNSRecord,
+  }: {
+    name: string;
+    baseArNSRecord?: AoArNSNameDataWithName;
+  }): Promise<NameResolution> {
     this.log.info('Resolving name...', { name });
     try {
       // get the base name which is the last of the array split by _
@@ -88,8 +102,12 @@ export class OnDemandArNSResolver implements NameResolver {
       if (baseName === undefined) {
         throw new Error('Invalid name');
       }
-      // find that name in the network process, using the circuit breaker if there are persistent AO issues
-      const arnsRecord = await this.aoCircuitBreaker.fire({ name: baseName });
+
+      // if we are not passed the baseArNSRecord find that name in the network
+      // process, using the circuit breaker if there are persistent AO issues
+      const arnsRecord =
+        baseArNSRecord ??
+        (await this.aoCircuitBreaker.fire({ name: baseName }));
 
       if (arnsRecord === undefined) {
         throw new Error('Unexpected undefined from CU');
@@ -102,6 +120,8 @@ export class OnDemandArNSResolver implements NameResolver {
           resolvedAt: Date.now(),
           ttl: 300,
           processId: undefined,
+          limit: undefined,
+          index: undefined,
         };
       }
 
@@ -119,16 +139,21 @@ export class OnDemandArNSResolver implements NameResolver {
       const undername =
         name === baseName ? '@' : name.replace(`_${baseName}`, '');
 
-      const antRecord = await ant.getRecord({
-        undername,
-      });
+      // enforce the limit of undername resolution, the ant contract is responsible for returning names in the order they should be resolved
+      const antRecords = await ant.getRecords();
+      const antRecord = antRecords[undername];
 
+      // fail quickly if the name is not in the contract
       if (antRecord === undefined) {
         throw new Error('Invalid name, ant record for name not found');
       }
 
-      const resolvedId = antRecord.transactionId;
-      const ttl = antRecord.ttlSeconds;
+      // sort the records by priority
+      const sortedRecords = sortANTRecords(antRecords);
+      const sortedAntRecord = sortedRecords[undername];
+      const resolvedId = sortedAntRecord.transactionId;
+      const ttl = sortedAntRecord.ttlSeconds;
+      const index = sortedAntRecord.index;
 
       if (!isValidDataId(resolvedId)) {
         throw new Error('Invalid resolved data ID');
@@ -139,6 +164,8 @@ export class OnDemandArNSResolver implements NameResolver {
         resolvedAt: Date.now(),
         processId: processId,
         ttl,
+        limit: arnsRecord.undernameLimit,
+        index,
       };
     } catch (error: any) {
       this.log.warn('Unable to resolve name:', {
@@ -154,6 +181,8 @@ export class OnDemandArNSResolver implements NameResolver {
       resolvedAt: undefined,
       ttl: undefined,
       processId: undefined,
+      limit: undefined,
+      index: undefined,
     };
   }
 }

@@ -2,24 +2,36 @@
 INSERT INTO bundles (
   id, root_transaction_id, format_id,
   unbundle_filter_id, index_filter_id,
+  previous_unbundle_filter_id, previous_index_filter_id,
   data_item_count, matched_data_item_count,
   first_queued_at, last_queued_at,
   first_skipped_at, last_skipped_at,
   first_unbundled_at, last_unbundled_at,
   first_fully_indexed_at, last_fully_indexed_at,
-  import_attempt_count
+  import_attempt_count, duplicated_data_item_count
 ) VALUES (
   @id, @root_transaction_id, @format_id,
   @unbundle_filter_id, @index_filter_id,
+  NULL, NULL,
   @data_item_count, @matched_data_item_count,
   @queued_at, @queued_at,
   @skipped_at, @skipped_at,
   @unbundled_at, @unbundled_at,
   @fully_indexed_at, @fully_indexed_at,
-  CASE WHEN @queued_at IS NOT NULL THEN 1 ELSE 0 END
+  CASE WHEN (@queued_at IS NOT NULL OR @skipped_at IS NOT NULL) THEN 1 ELSE 0 END,
+  @duplicated_data_item_count
 ) ON CONFLICT DO UPDATE SET
   data_item_count = IFNULL(@data_item_count, data_item_count),
   matched_data_item_count = IFNULL(@matched_data_item_count, matched_data_item_count),
+  duplicated_data_item_count = IFNULL(@duplicated_data_item_count, duplicated_data_item_count),
+  previous_unbundle_filter_id = CASE
+    WHEN @unbundle_filter_id IS NOT NULL THEN bundles.unbundle_filter_id
+    ELSE bundles.previous_unbundle_filter_id
+  END,
+  previous_index_filter_id = CASE
+    WHEN @index_filter_id IS NOT NULL THEN bundles.index_filter_id
+    ELSE bundles.previous_index_filter_id
+  END,
   unbundle_filter_id = IFNULL(@unbundle_filter_id, unbundle_filter_id),
   index_filter_id = IFNULL(@index_filter_id, index_filter_id),
   first_queued_at = IFNULL(first_queued_at, @queued_at),
@@ -31,11 +43,28 @@ INSERT INTO bundles (
   first_fully_indexed_at = IFNULL(first_fully_indexed_at, @fully_indexed_at),
   last_fully_indexed_at = @fully_indexed_at,
   import_attempt_count = CASE
-    WHEN @queued_at IS NOT NULL THEN
-      COALESCE(bundles.import_attempt_count, 0) + 1
+    WHEN (@queued_at IS NOT NULL OR @skipped_at IS NOT NULL) THEN
+    COALESCE(bundles.import_attempt_count, 0) + 1
     ELSE
-      bundles.import_attempt_count
+    bundles.import_attempt_count
   END
+RETURNING
+  unbundle_filter_id,
+  index_filter_id,
+  previous_unbundle_filter_id,
+  previous_index_filter_id,
+  last_fully_indexed_at;
+
+-- updateBundleRetry
+UPDATE bundles
+SET
+  retry_attempt_count = COALESCE(retry_attempt_count, 0) + 1,
+  first_retried_at = CASE
+    WHEN first_retried_at IS NULL THEN @current_timestamp
+    ELSE first_retried_at
+  END,
+  last_retried_at = @current_timestamp
+WHERE root_transaction_id = @root_transaction_id;
 
 -- insertOrIgnoreWallet
 INSERT INTO wallets (address, public_modulus)

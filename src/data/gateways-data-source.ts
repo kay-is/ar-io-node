@@ -29,8 +29,7 @@ import {
   RequestAttributes,
 } from '../types.js';
 import * as metrics from '../metrics.js';
-
-const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+import * as config from '../config.js';
 
 export class GatewaysDataSource implements ContiguousDataSource {
   private log: winston.Logger;
@@ -40,7 +39,7 @@ export class GatewaysDataSource implements ContiguousDataSource {
   constructor({
     log,
     trustedGatewaysUrls,
-    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    requestTimeoutMs = config.TRUSTED_GATEWAYS_REQUEST_TIMEOUT_MS,
   }: {
     log: winston.Logger;
     trustedGatewaysUrls: Record<string, number>;
@@ -104,6 +103,42 @@ export class GatewaysDataSource implements ContiguousDataSource {
             timeout: this.requestTimeoutMs,
           });
 
+          gatewayAxios.interceptors.request.use((config) => {
+            this.log.debug('Axios request initiated', {
+              url: config.url,
+              method: config.method,
+              headers: config.headers,
+              params: config.params,
+              timeout: config.timeout,
+            });
+            return config;
+          });
+
+          gatewayAxios.interceptors.response.use(
+            (response) => {
+              this.log.debug('Axios response received', {
+                url: response.config.url,
+                status: response.status,
+                headers: response.headers,
+              });
+              return response;
+            },
+            (error) => {
+              if (error.response) {
+                this.log.error('Axios response error', {
+                  url: error.response.config.url,
+                  status: error.response.status,
+                  headers: error.response.headers,
+                });
+              } else {
+                this.log.error('Axios network error', {
+                  message: error.message,
+                });
+              }
+              return Promise.reject(error);
+            },
+          );
+
           this.log.debug('Attempting to fetch contiguous data from gateway', {
             id,
             gatewayUrl,
@@ -152,12 +187,14 @@ export class GatewaysDataSource implements ContiguousDataSource {
             stream.on('error', () => {
               metrics.getDataStreamErrorsTotal.inc({
                 class: this.constructor.name,
+                source: gatewayUrl,
               });
             });
 
             stream.on('end', () => {
               metrics.getDataStreamSuccessesTotal.inc({
                 class: this.constructor.name,
+                source: gatewayUrl,
               });
             });
 

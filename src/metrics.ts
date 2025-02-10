@@ -236,6 +236,21 @@ export const arnsCacheMissCounter = new promClient.Counter({
   help: 'Number of misses in the arns cache',
 });
 
+export const arnsNameCacheDurationSummary = new promClient.Summary({
+  name: 'arns_name_cache_duration_ms',
+  help: 'Time in ms it takes to fetch and cache arns base names',
+});
+
+export const arnsNameCacheHitCounter = new promClient.Counter({
+  name: 'arns_name_cache_hit_total',
+  help: 'Number of hits in the arns name cache',
+});
+
+export const arnsNameCacheMissCounter = new promClient.Counter({
+  name: 'arns_name_cache_miss_total',
+  help: 'Number of misses in the arns name cache',
+});
+
 export const arnsResolutionTime = new promClient.Summary({
   name: 'arns_resolution_time_ms',
   help: 'Time in ms it takes to resolve an arns name',
@@ -248,19 +263,35 @@ export const arnsResolutionTime = new promClient.Summary({
 export const getDataErrorsTotal = new promClient.Counter({
   name: 'get_data_errors_total',
   help: 'Count of requests errors',
-  labelNames: ['class'],
+  labelNames: ['class', 'source'] as const,
 });
 
 export const getDataStreamErrorsTotal = new promClient.Counter({
   name: 'get_data_stream_errors_total',
   help: 'Count of data stream errors',
-  labelNames: ['class'],
+  labelNames: ['class', 'source'] as const,
 });
 
 export const getDataStreamSuccessesTotal = new promClient.Counter({
   name: 'get_data_stream_successes_total',
   help: 'Count of data stream successes',
-  labelNames: ['class'],
+  labelNames: ['class', 'source'] as const,
+});
+
+//
+// Chunk source metrics
+//
+
+export const requestChunkTotal = new promClient.Counter({
+  name: 'request_chunk_total',
+  help: 'Count of each individual chunk http request, status can be "error" or "success", source_type can be "trusted" or "peer".',
+  labelNames: ['status', 'class', 'method', 'source', 'source_type'] as const,
+});
+
+export const getChunkTotal = new promClient.Counter({
+  name: 'get_chunk_total',
+  help: 'Higher level count of chunk discovery, counts when the caller request for chunk ends, stores the status of the request',
+  labelNames: ['status', 'class', 'method'] as const,
 });
 
 //

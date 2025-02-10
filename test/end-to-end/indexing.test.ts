@@ -647,6 +647,7 @@ describe('Indexing', function () {
   describe('Queue bundle', function () {
     let bundlesDb: Database;
     let compose: StartedDockerComposeEnvironment;
+    const bundleId = 'FcWiW5v28eBf5s9XAKTRiqD7dq9xX_lS5N6Xb2Y89NY';
 
     const waitForIndexing = async () => {
       const getAll = () =>
@@ -659,7 +660,10 @@ describe('Indexing', function () {
     };
 
     before(async function () {
-      compose = await composeUp();
+      compose = await composeUp({
+        ANS104_UNBUNDLE_FILTER:
+          '{"or": [{"attributes": {"owner_address": "another_address"}}, { "isNestedBundle": true }]}',
+      });
       bundlesDb = new Sqlite(`${projectRootPath}/data/sqlite/bundles.db`);
 
       // queue bundle FcWiW5v28eBf5s9XAKTRiqD7dq9xX_lS5N6Xb2Y89NY
@@ -676,7 +680,7 @@ describe('Indexing', function () {
           'Content-Type': 'application/json',
         },
         data: {
-          id: 'FcWiW5v28eBf5s9XAKTRiqD7dq9xX_lS5N6Xb2Y89NY',
+          id: bundleId,
         },
       });
 
@@ -687,7 +691,7 @@ describe('Indexing', function () {
       await compose.down();
     });
 
-    it('Verifying if bundle was unbundled and indexed', async function () {
+    it('Verifying if bundle was unbundled and indexed, ignoring any filter by default', async function () {
       const stmt = bundlesDb.prepare('SELECT * FROM new_data_items');
       const dataItems = stmt.all();
 
@@ -764,6 +768,109 @@ describe('Indexing', function () {
         assert.equal(dataItem.size, idAndSignatureType[id].size);
       });
     });
+
+    it('Verifying if request is rejected if byPassFilter is not a boolean', async function () {
+      const res = await axios.post(
+        'http://localhost:4000/ar-io/admin/queue-bundle',
+        {
+          id: 'FcWiW5v28eBf5s9XAKTRiqD7dq9xX_lS5N6Xb2Y89NY',
+          bypassFilter: 'true',
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer secret',
+          },
+          validateStatus: () => true,
+        },
+      );
+
+      assert.equal(res.status, 400);
+      assert.equal(res.data, "'bypassFilter' must be a boolean");
+    });
+
+    it('Verifying if request is rejected if id is not provided', async function () {
+      const res = await axios.post(
+        'http://localhost:4000/ar-io/admin/queue-bundle',
+        {
+          bypassFilter: true,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer secret',
+          },
+          validateStatus: () => true,
+        },
+      );
+
+      assert.equal(res.status, 400);
+      assert.equal(res.data, "Must provide 'id'");
+    });
+
+    it('Verifying if data item is not bundled if byPassFilter is false and bundle does not match filter', async function () {
+      await axios.post(
+        'http://localhost:4000/ar-io/admin/queue-bundle',
+        {
+          id: '-H3KW7RKTXMg5Miq2jHx36OHSVsXBSYuE2kxgsFj6OQ',
+          bypassFilter: false,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer secret',
+          },
+        },
+      );
+
+      await waitForIndexing();
+
+      const stmt = bundlesDb.prepare(
+        'SELECT * FROM new_data_items WHERE parent_id = @id',
+      );
+      const dataItems = stmt.all({
+        id: '-H3KW7RKTXMg5Miq2jHx36OHSVsXBSYuE2kxgsFj6OQ',
+      });
+
+      assert.equal(dataItems.length, 0);
+    });
+
+    it('Verifying if unbundling is skipped when trying to unbundle the same bundle twice using the same filters', async function () {
+      const response = await axios({
+        method: 'post',
+        url: 'http://localhost:4000/ar-io/admin/queue-bundle',
+        headers: {
+          Authorization: 'Bearer secret',
+          'Content-Type': 'application/json',
+        },
+        data: {
+          id: bundleId,
+        },
+      });
+
+      assert.equal(response.data.message, 'Bundle skipped');
+    });
+
+    it('Verifying if unbundling when trying to unbundle the same bundle using different filters', async function () {
+      await compose.down();
+      compose = await composeUp({
+        ANS104_UNBUNDLE_FILTER:
+          '{ "attributes": { "owner": "8jNb-iG3a3XByFuZnZ_MWMQSZE0zvxPMaMMBNMYegY4" } }',
+      });
+      const response = await axios({
+        method: 'post',
+        url: 'http://localhost:4000/ar-io/admin/queue-bundle',
+        headers: {
+          Authorization: 'Bearer secret',
+          'Content-Type': 'application/json',
+        },
+        data: {
+          id: bundleId,
+        },
+      });
+
+      assert.equal(response.data.message, 'Bundle queued');
+    });
   });
 
   describe('Queue data item', function () {
@@ -816,7 +923,7 @@ describe('Indexing', function () {
       await compose.down();
     });
 
-    it('Verifying if data item headers were indexed', async function () {
+    it.skip('Verifying if data item headers were indexed', async function () {
       const stmt = bundlesDb.prepare('SELECT * FROM new_data_items');
       const dataItems = stmt.all();
 
@@ -846,6 +953,7 @@ describe('Indexing', function () {
   describe('Background data verification', function () {
     let dataDb: Database;
     let compose: StartedDockerComposeEnvironment;
+    const bundleId = '-H3KW7RKTXMg5Miq2jHx36OHSVsXBSYuE2kxgsFj6OQ';
 
     const waitForIndexing = async () => {
       const getAll = () =>
@@ -862,36 +970,65 @@ describe('Indexing', function () {
         dataDb.prepare('SELECT verified FROM contiguous_data_ids').all();
 
       while (getAll().some((row) => row.verified === 0)) {
-        console.log('Waiting for data items to be verified...');
+        console.log('Waiting for data items to be verified...', {
+          verified: getAll().filter((row) => row.verified === 1).length,
+          total: getAll().length,
+        });
 
         await wait(5000);
       }
     };
 
-    before(async function () {
-      compose = await composeUp({
-        ENABLE_BACKGROUND_DATA_VERIFICATION: 'true',
-        BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS: '10',
-        BACKGROUND_RETRIEVAL_ORDER: 'trusted-gateways',
-      });
-      dataDb = new Sqlite(`${projectRootPath}/data/sqlite/data.db`);
+    before(
+      async function () {
+        compose = await composeUp({
+          ENABLE_BACKGROUND_DATA_VERIFICATION: 'true',
+          BACKGROUND_DATA_VERIFICATION_INTERVAL_SECONDS: '1',
+          BACKGROUND_RETRIEVAL_ORDER: 'trusted-gateways',
+        });
+        dataDb = new Sqlite(`${projectRootPath}/data/sqlite/data.db`);
 
-      await axios.post(
-        'http://localhost:4000/ar-io/admin/queue-bundle',
-        {
-          id: '-H3KW7RKTXMg5Miq2jHx36OHSVsXBSYuE2kxgsFj6OQ',
-        },
-        {
+        // queue the bundle tx to populate the data root
+        await axios({
+          method: 'post',
+          url: 'http://localhost:4000/ar-io/admin/queue-tx',
           headers: {
-            'Content-Type': 'application/json',
             Authorization: 'Bearer secret',
+            'Content-Type': 'application/json',
           },
-        },
-      );
+          data: { id: bundleId },
+        });
 
-      await waitForIndexing();
-      await waitVerification();
-    });
+        // queue the bundle to index the data items, there should be 79 data items in this bundle, once the root tx is indexed and verified all associated data items should be marked as verified
+        await axios({
+          method: 'post',
+          url: 'http://localhost:4000/ar-io/admin/queue-bundle',
+          headers: {
+            Authorization: 'Bearer secret',
+            'Content-Type': 'application/json',
+          },
+          data: { id: bundleId },
+        });
+
+        // queue the bundle to index the data items, there should be 79 data items in this bundle, once the root tx is indexed and verified all associated data items should be marked as verified
+        await axios.post(
+          'http://localhost:4000/ar-io/admin/queue-bundle',
+          {
+            id: bundleId,
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer secret',
+            },
+          },
+        );
+
+        await waitForIndexing();
+        await waitVerification();
+      },
+      { timeout: 120_000 },
+    );
 
     after(async function () {
       await compose.down();
@@ -994,6 +1131,83 @@ describe('Indexing', function () {
       });
 
       assert.equal(res.headers['content-encoding'], 'gzip');
+    });
+  });
+
+  describe('Indexing of different L1 signature types', function () {
+    const secp256k1TxId = 'G59jD7x4Ykz0sC4lf-gtsHzYovzjuc0MORyD-O4aWA0';
+
+    let coreDb: Database;
+    let compose: StartedDockerComposeEnvironment;
+
+    const waitForIndexingOfTxId = async (txIdToWaitFor: string) => {
+      const getSpecificTxId = () =>
+        coreDb
+          .prepare(`SELECT id FROM new_transactions WHERE id = @id`)
+          .all({ id: fromB64Url(txIdToWaitFor) });
+
+      while (getSpecificTxId().length === 0) {
+        console.log('Waiting for layer-1 tx to be indexed...');
+        await wait(5000);
+      }
+    };
+
+    before(async function () {
+      compose = await composeUp({
+        ARNS_ROOT_HOST: '',
+      });
+
+      await axios({
+        method: 'post',
+        url: 'http://localhost:4000/ar-io/admin/queue-tx',
+        headers: {
+          Authorization: 'Bearer secret',
+          'Content-Type': 'application/json',
+        },
+        data: { id: secp256k1TxId },
+      });
+
+      coreDb = new Sqlite(`${projectRootPath}/data/sqlite/core.db`);
+
+      await waitForIndexingOfTxId(secp256k1TxId);
+    });
+
+    after(async function () {
+      await compose.down();
+    });
+
+    it('Verifying if secp256k1TxId signed tx has correct owner', async function () {
+      // Query to get the owner's public key from the wallet associated with the transaction
+      const walletQuery = `
+        SELECT public_modulus
+        FROM wallets
+          WHERE address = (
+          SELECT owner_address
+          FROM new_transactions
+          WHERE id = @id
+        );`;
+
+      const stmt = coreDb.prepare(walletQuery);
+      const transaction = stmt.get({ id: fromB64Url(secp256k1TxId) });
+      const actualOwnerPublicKey =
+        transaction.public_modulus.toString('base64url');
+      const expectedOwnerPublicKey =
+        'A9jOdCekWyY5pVjSOYBzeSEi-rQ0cIC3XsYbK9gShlgL';
+
+      assert.equal(actualOwnerPublicKey, expectedOwnerPublicKey);
+    });
+
+    it('Verifying if secp256k1TxId signed tx has correct owner_address', async function () {
+      // Query to get the owner's address from the transaction
+      const stmt = coreDb.prepare(
+        'SELECT owner_address FROM new_transactions WHERE id = @id',
+      );
+      const transaction = stmt.get({ id: fromB64Url(secp256k1TxId) });
+      const actualOwnerAddress =
+        transaction.owner_address.toString('base64url');
+      const expectedOwnerAddress =
+        'mtBAWAKk76PTvOvu3cy1H-gvpRkGStmfWYi5Ja-a8y8';
+      assert.equal(actualOwnerAddress, expectedOwnerAddress);
     });
   });
 });

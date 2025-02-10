@@ -46,6 +46,7 @@ import { normalizeAns104DataItem } from '../lib/ans-104.js';
 import log from '../log.js';
 import { BundleRecord } from '../types.js';
 import { processBundleStream } from '../lib/bundles.js';
+import wait from 'wait';
 
 const HEIGHT = 1138;
 const BLOCK_TX_INDEX = 42;
@@ -53,6 +54,36 @@ const DATA_ITEM_ID = 'zoljIRyzG5hp-R4EZV2q8kFI49OAoy23_B9YJ_yEEws';
 const CURSOR =
   'WzExMzgsNDIsInpvbGpJUnl6RzVocC1SNEVaVjJxOGtGSTQ5T0FveTIzX0I5WUpfeUVFd3MiLDE2MzAwMDAwMDAsInpvbGpJUnl6RzVocC1SNEVaVjJxOGtGSTQ5T0FveTIzX0I5WUpfeUVFd3MiXQ';
 const INDEXED_AT = 1630000000;
+
+const dataItemRootTxId = '0000000000000000000000000000000000000000000';
+const dataItem = {
+  anchor: 'a',
+  dataOffset: 10,
+  dataSize: 1,
+  id: DATA_ITEM_ID,
+  offset: 10,
+  owner: 'a',
+  ownerOffset: 1,
+  ownerSize: 1,
+  sigName: 'a',
+  signature: 'a',
+  signatureOffset: 1,
+  signatureSize: 1,
+  signatureType: 1,
+  size: 1,
+  tags: [],
+  target: 'a',
+};
+const normalizedDataItem = normalizeAns104DataItem({
+  rootTxId: dataItemRootTxId,
+  parentId: dataItemRootTxId,
+  parentIndex: -1,
+  index: 0,
+  ans104DataItem: dataItem,
+  filter: '',
+  dataHash: '',
+  rootParentOffset: 0,
+});
 
 describe('SQLite helper functions', () => {
   describe('toSqliteParams', () => {
@@ -188,6 +219,7 @@ describe('StandaloneSqliteDatabase', () => {
       dataDbPath,
       moderationDbPath,
       bundlesDbPath,
+      tagSelectivity: {},
     });
     dbWorker = new StandaloneSqliteDatabaseWorker({
       log,
@@ -195,6 +227,7 @@ describe('StandaloneSqliteDatabase', () => {
       dataDbPath,
       moderationDbPath,
       bundlesDbPath,
+      tagSelectivity: {},
     });
     chainSource = new ArweaveChainSourceStub();
   });
@@ -331,14 +364,7 @@ describe('StandaloneSqliteDatabase', () => {
           .digest();
         assert.deepEqual(dbTransactions[i].owner_address, ownerAddress);
 
-        const binaryFields = [
-          'id',
-          'signature',
-          'last_tx',
-          'owner',
-          'target',
-          'data_root',
-        ];
+        const binaryFields = ['id', 'last_tx', 'owner', 'target', 'data_root'];
 
         for (const field of binaryFields) {
           assert.ok(dbTransactions[i][field] instanceof Buffer);
@@ -793,14 +819,7 @@ describe('StandaloneSqliteDatabase', () => {
           .digest();
         assert.deepEqual(dbTransactions[i].owner_address, ownerAddress);
 
-        const binaryFields = [
-          'id',
-          'signature',
-          'last_tx',
-          'owner',
-          'target',
-          'data_root',
-        ];
+        const binaryFields = ['id', 'last_tx', 'owner', 'target', 'data_root'];
 
         for (const field of binaryFields) {
           assert.ok(dbTransactions[i][field] instanceof Buffer);
@@ -894,14 +913,7 @@ describe('StandaloneSqliteDatabase', () => {
           .digest();
         assert.deepEqual(dbTransactions[i].owner_address, ownerAddress);
 
-        const binaryFields = [
-          'id',
-          'signature',
-          'last_tx',
-          'owner',
-          'target',
-          'data_root',
-        ];
+        const binaryFields = ['id', 'last_tx', 'owner', 'target', 'data_root'];
 
         for (const field of binaryFields) {
           assert.ok(dbTransactions[i][field] instanceof Buffer);
@@ -1023,6 +1035,7 @@ describe('StandaloneSqliteDatabase', () => {
   describe('saveBundle', () => {
     const id0 = '0000000000000000000000000000000000000000000';
     const id1 = '1111111111111111111111111111111111111111111';
+    const id2 = '2222222222222222222222222222222222222222222';
 
     const bundle: BundleRecord = {
       id: id0,
@@ -1031,9 +1044,27 @@ describe('StandaloneSqliteDatabase', () => {
       matchedDataItemCount: 2,
     };
 
+    const bundleId1 = {
+      ...bundle,
+      id: id1,
+      queuedAt: 1234567890,
+      duplicatedDataItemCount: 1,
+    };
+
+    const sql = `
+      SELECT *
+      FROM bundles
+      WHERE id = @id
+    `;
+
     beforeEach(async () => {
       await db.saveBundle(bundle);
-      await db.saveBundle({ ...bundle, id: id1, queuedAt: 1234567890 });
+      await db.saveBundle(bundleId1);
+      await db.saveBundle({
+        ...bundle,
+        id: id2,
+        skippedAt: 1234567890,
+      });
     });
 
     it('should insert into bundles', async () => {
@@ -1046,13 +1077,63 @@ describe('StandaloneSqliteDatabase', () => {
       assert.equal(bundlesDb.prepare(sql).get({ id: fromB64Url(id0) }).cnt, 1);
     });
 
-    it('should set import_attempt_count 0 when no queuedAt is provided', async () => {
-      const sql = `
-        SELECT *
-        FROM bundles
-        WHERE id = @id
-      `;
+    it('should update previous_unbundle_filter_id when unbundle_filter_id is not null', async () => {
+      let bundle = bundlesDb.prepare(sql).get({ id: fromB64Url(id1) });
 
+      // Verify initial state
+      assert.equal(bundle.unbundle_filter_id, null);
+      assert.equal(bundle.previous_unbundle_filter_id, null);
+
+      await db.saveBundle({
+        ...bundleId1,
+        unbundleFilter: '{"never": true}',
+      });
+
+      bundle = bundlesDb.prepare(sql).get({ id: fromB64Url(id1) });
+
+      assert.equal(bundle.unbundle_filter_id, 1);
+      assert.equal(bundle.previous_unbundle_filter_id, null);
+
+      await db.saveBundle({
+        ...bundleId1,
+        unbundleFilter: '{"always": true}',
+      });
+
+      bundle = bundlesDb.prepare(sql).get({ id: fromB64Url(id1) });
+
+      assert.equal(bundle.unbundle_filter_id, 2);
+      assert.equal(bundle.previous_unbundle_filter_id, 1);
+    });
+
+    it('should update previous_index_filter_id when index_filter_id is not null', async () => {
+      let bundle = bundlesDb.prepare(sql).get({ id: fromB64Url(id1) });
+
+      // Verify initial state
+      assert.equal(bundle.index_filter_id, null);
+      assert.equal(bundle.previous_index_filter_id, null);
+
+      await db.saveBundle({
+        ...bundleId1,
+        indexFilter: '{"never": true}',
+      });
+
+      bundle = bundlesDb.prepare(sql).get({ id: fromB64Url(id1) });
+
+      assert.equal(bundle.index_filter_id, 1);
+      assert.equal(bundle.previous_index_filter_id, null);
+
+      await db.saveBundle({
+        ...bundleId1,
+        indexFilter: '{"always": true}',
+      });
+
+      bundle = bundlesDb.prepare(sql).get({ id: fromB64Url(id1) });
+
+      assert.equal(bundle.index_filter_id, 2);
+      assert.equal(bundle.previous_index_filter_id, 1);
+    });
+
+    it('should set import_attempt_count 0 when no queuedAt or skippedAt is provided', async () => {
       assert.equal(
         bundlesDb.prepare(sql).get({ id: fromB64Url(id0) })
           .import_attempt_count,
@@ -1060,24 +1141,189 @@ describe('StandaloneSqliteDatabase', () => {
       );
     });
 
-    it('should set import_attempt_count 1 when queuedAt is provided', async () => {
-      const sql = `
-        SELECT *
-        FROM bundles
-        WHERE id = @id
-      `;
+    it('should set import_attempt_count 1 when queuedAt or skippedAt is provided', async () => {
+      assert.equal(
+        bundlesDb.prepare(sql).get({ id: fromB64Url(id1) })
+          .import_attempt_count,
+        1,
+      );
+
+      assert.equal(
+        bundlesDb.prepare(sql).get({ id: fromB64Url(id2) })
+          .import_attempt_count,
+        1,
+      );
+    });
+
+    it("shouldn't increment import_attempt_count when no queuedAt or skippedAt", async () => {
+      await db.saveBundle({
+        ...bundle,
+        id: id1,
+      });
+      await db.saveBundle({
+        ...bundle,
+        id: id2,
+      });
 
       assert.equal(
         bundlesDb.prepare(sql).get({ id: fromB64Url(id1) })
           .import_attempt_count,
         1,
       );
+
+      assert.equal(
+        bundlesDb.prepare(sql).get({ id: fromB64Url(id2) })
+          .import_attempt_count,
+        1,
+      );
+    });
+
+    it('should increment import_attempt_count when queuedAt or skippedAt is provided', async () => {
+      await db.saveBundle({
+        ...bundle,
+        id: id1,
+        queuedAt: 1234567890,
+      });
+      await db.saveBundle({
+        ...bundle,
+        id: id2,
+        skippedAt: 1234567890,
+      });
+
+      assert.equal(
+        bundlesDb.prepare(sql).get({ id: fromB64Url(id1) })
+          .import_attempt_count,
+        2,
+      );
+
+      assert.equal(
+        bundlesDb.prepare(sql).get({ id: fromB64Url(id2) })
+          .import_attempt_count,
+        2,
+      );
     });
   });
 
-  describe('getUnverifiedDataIds', () => {
-    it("should return an empty list if there's no unverified data ids", async () => {
-      const emptyDbIds = await db.getUnverifiedDataIds();
+  describe('saveBundleRetries', () => {
+    const rootTxId1 = '1111111111111111111111111111111111111111111';
+    const rootTxId2 = '2222222222222222222222222222222222222222222';
+    const bundleId1 = '3333333333333333333333333333333333333333333';
+    const bundleId2 = '4444444444444444444444444444444444444444444';
+    const bundleId3 = '5555555555555555555555555555555555555555555';
+
+    const sql = `
+      SELECT *
+      FROM bundles
+      WHERE id = @id
+    `;
+
+    beforeEach(async () => {
+      await db.saveBundle({
+        id: bundleId1,
+        format: 'ans-104',
+        dataItemCount: 2,
+        matchedDataItemCount: 2,
+        rootTransactionId: rootTxId1,
+      });
+
+      await db.saveBundle({
+        id: bundleId2,
+        format: 'ans-104',
+        dataItemCount: 2,
+        matchedDataItemCount: 2,
+        rootTransactionId: rootTxId1,
+      });
+
+      await db.saveBundle({
+        id: bundleId3,
+        format: 'ans-104',
+        dataItemCount: 2,
+        matchedDataItemCount: 2,
+        rootTransactionId: rootTxId2,
+      });
+    });
+
+    it('should update all bundles sharing the same root transaction id', async () => {
+      let bundle1 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId1) });
+      let bundle2 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId2) });
+      let bundle3 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId3) });
+
+      assert.equal(bundle1.retry_attempt_count, null);
+      assert.equal(bundle1.first_retried_at, null);
+      assert.equal(bundle1.last_retried_at, null);
+
+      assert.equal(bundle2.retry_attempt_count, null);
+      assert.equal(bundle2.first_retried_at, null);
+      assert.equal(bundle2.last_retried_at, null);
+
+      assert.equal(bundle3.retry_attempt_count, null);
+      assert.equal(bundle3.first_retried_at, null);
+      assert.equal(bundle3.last_retried_at, null);
+
+      await db.saveBundleRetries(rootTxId1);
+
+      bundle1 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId1) });
+      bundle2 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId2) });
+      bundle3 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId3) });
+
+      assert.equal(bundle1.retry_attempt_count, 1);
+      assert.ok(bundle1.first_retried_at !== null);
+      assert.ok(bundle1.last_retried_at !== null);
+
+      assert.equal(bundle2.retry_attempt_count, 1);
+      assert.ok(bundle2.first_retried_at !== null);
+      assert.ok(bundle2.last_retried_at !== null);
+
+      assert.equal(bundle3.retry_attempt_count, null);
+      assert.equal(bundle3.first_retried_at, null);
+      assert.equal(bundle3.last_retried_at, null);
+
+      await wait(1000);
+
+      await db.saveBundleRetries(rootTxId1);
+
+      bundle1 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId1) });
+      bundle2 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId2) });
+      bundle3 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId3) });
+
+      assert.equal(bundle1.retry_attempt_count, 2);
+      assert.ok(bundle1.last_retried_at > bundle1.first_retried_at);
+
+      assert.equal(bundle2.retry_attempt_count, 2);
+      assert.ok(bundle2.last_retried_at > bundle2.first_retried_at);
+
+      assert.equal(bundle3.retry_attempt_count, null);
+      assert.equal(bundle3.first_retried_at, null);
+      assert.equal(bundle3.last_retried_at, null);
+    });
+
+    it('should update timestamps correctly for multiple bundles', async () => {
+      await db.saveBundleRetries(rootTxId1);
+
+      let bundle1 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId1) });
+      let bundle2 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId2) });
+
+      assert.equal(bundle1.first_retried_at, bundle2.first_retried_at);
+      assert.equal(bundle1.last_retried_at, bundle2.last_retried_at);
+
+      await wait(1000);
+
+      await db.saveBundleRetries(rootTxId1);
+
+      bundle1 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId1) });
+      bundle2 = bundlesDb.prepare(sql).get({ id: fromB64Url(bundleId2) });
+
+      assert.equal(bundle1.first_retried_at, bundle2.first_retried_at);
+
+      assert.equal(bundle1.last_retried_at, bundle2.last_retried_at);
+      assert.ok(bundle1.last_retried_at > bundle1.first_retried_at);
+      assert.ok(bundle2.last_retried_at > bundle2.first_retried_at);
+    });
+  });
+
+  describe('getVerifiableDataIds', () => {
+    it("should return an empty list if there's no verifiable data ids", async () => {
+      const emptyDbIds = await db.getVerifiableDataIds();
       assert.equal(emptyDbIds.length, 0);
 
       // inserting a verified data id
@@ -1088,11 +1334,11 @@ describe('StandaloneSqliteDatabase', () => {
         verified: true,
       });
 
-      const unverifiedIds = await db.getUnverifiedDataIds();
-      assert.equal(unverifiedIds.length, 0);
+      const verifiableIds = await db.getVerifiableDataIds();
+      assert.equal(verifiableIds.length, 0);
     });
 
-    it('should return a list of ids if unverified data ids exists', async () => {
+    it('should return a list of ids if verifiable data ids exists', async () => {
       // inserting a verified data id
       await db.saveDataContentAttributes({
         id: '0000000000000000000000000000000000000000000',
@@ -1103,51 +1349,21 @@ describe('StandaloneSqliteDatabase', () => {
 
       // inserting an unverified data id
       await db.saveDataContentAttributes({
-        id: 'fLxHz2WbpNFL7x1HrOyUlsAVHYaKSyj6IqgCJlFuv9g',
+        id: DATA_ITEM_ID,
         hash: 'hash',
         dataSize: 10,
         verified: false,
       });
 
-      const unverifiedIds = await db.getUnverifiedDataIds();
-      assert.equal(unverifiedIds.length, 1);
-      assert.deepEqual(unverifiedIds, [
-        'fLxHz2WbpNFL7x1HrOyUlsAVHYaKSyj6IqgCJlFuv9g',
-      ]);
+      await db.saveDataItem(normalizedDataItem);
+
+      const verifiableIds = await db.getVerifiableDataIds();
+      assert.equal(verifiableIds.length, 1);
+      assert.deepEqual(verifiableIds, [DATA_ITEM_ID]);
     });
   });
 
   describe('getRootTxId', () => {
-    const dataItemRootTxId = '0000000000000000000000000000000000000000000';
-    const dataItem = {
-      anchor: 'a',
-      dataOffset: 10,
-      dataSize: 1,
-      id: DATA_ITEM_ID,
-      offset: 10,
-      owner: 'a',
-      ownerOffset: 1,
-      ownerSize: 1,
-      sigName: 'a',
-      signature: 'a',
-      signatureOffset: 1,
-      signatureSize: 1,
-      signatureType: 1,
-      size: 1,
-      tags: [],
-      target: 'a',
-    };
-    const normalizedDataItem = normalizeAns104DataItem({
-      rootTxId: dataItemRootTxId,
-      parentId: dataItemRootTxId,
-      parentIndex: -1,
-      index: 0,
-      ans104DataItem: dataItem,
-      filter: '',
-      dataHash: '',
-      rootParentOffset: 0,
-    });
-
     it('should return undefined if id is not found', async () => {
       const rootTxId = await db.getRootTxId(DATA_ITEM_ID);
       assert.equal(rootTxId, undefined);

@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 import { Readable, Writable } from 'node:stream';
+import { AoArNSNameDataWithName } from '@ar.io/sdk';
 
 export interface B64uTag {
   name: string;
@@ -211,14 +212,24 @@ export interface BundleRecord {
   indexFilter?: string;
   dataItemCount?: number;
   matchedDataItemCount?: number;
+  duplicatedDataItemCount?: number;
   queuedAt?: number;
   skippedAt?: number;
   unbundledAt?: number;
   fullyIndexedAt?: number;
 }
 
+export interface BundleSaveResult {
+  unbundleFilterId?: string;
+  indexFilterId?: string;
+  previousUnbundleFilterId?: string;
+  previousIndexFilterId?: string;
+  lastFullyIndexedAt?: number;
+}
+
 export interface BundleIndex {
-  saveBundle(bundle: BundleRecord): Promise<void>;
+  saveBundle(bundle: BundleRecord): Promise<BundleSaveResult>;
+  saveBundleRetries(rootTransactionId: string): Promise<void>;
   getFailedBundleIds(limit: number): Promise<string[]>;
   updateBundlesFullyIndexedAt(): Promise<void>;
   updateBundlesForFilterChange(
@@ -567,7 +578,7 @@ export interface ContiguousDataIndex {
     cachedAt?: number;
     verified?: boolean;
   }): Promise<void>;
-  getUnverifiedDataIds(): Promise<string[]>;
+  getVerifiableDataIds(): Promise<string[]>;
   getRootTxId(id: string): Promise<string | undefined>;
   saveVerificationStatus(id: string): Promise<void>;
 }
@@ -611,6 +622,8 @@ export interface ValidNameResolution {
   resolvedAt: number;
   ttl: number;
   processId: string;
+  limit: number;
+  index: number;
 }
 
 // Name resolved, but is missing
@@ -620,15 +633,19 @@ export interface MissingNameResolution {
   resolvedAt: number;
   ttl: number;
   processId: undefined;
+  limit: undefined;
+  index: undefined;
 }
 
-// An error occured while resolving the name
+// An error occurred while resolving the name
 export interface FailedNameResolution {
   name: string;
   resolvedId: undefined;
   resolvedAt: undefined;
   ttl: undefined;
   processId: undefined;
+  limit: undefined;
+  index: undefined;
 }
 
 type NameResolution =
@@ -637,7 +654,13 @@ type NameResolution =
   | FailedNameResolution;
 
 export interface NameResolver {
-  resolve(name: string): Promise<NameResolution>;
+  resolve({
+    name,
+    baseArNSRecord,
+  }: {
+    name: string;
+    baseArNSRecord?: AoArNSNameDataWithName;
+  }): Promise<NameResolution>;
 }
 
 export interface MatchableItem {

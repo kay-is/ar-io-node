@@ -46,13 +46,13 @@ if (config.ARNS_ROOT_HOST !== undefined) {
 arnsRouter.get('/ar-io/resolver/:name', async (req, res) => {
   const { name } = req.params;
   // TODO: replace this with the same request cache used in arns middleware
-  const resolved = await system.nameResolver.resolve(name);
+  const resolved = await system.nameResolver.resolve({ name });
   if (resolved === undefined) {
     sendNotFound(res);
     return;
   }
 
-  const { resolvedId, ttl, processId, resolvedAt } = resolved;
+  const { resolvedId, ttl, processId, resolvedAt, index, limit } = resolved;
 
   if (resolvedId === undefined) {
     sendNotFound(res);
@@ -66,11 +66,15 @@ arnsRouter.get('/ar-io/resolver/:name', async (req, res) => {
   );
   res.header(headerNames.arnsProcessId, processId);
   res.header(headerNames.arnsResolvedAt, resolvedAt.toString());
+  res.header(headerNames.arnsIndex, index.toString());
+  res.header(headerNames.arnsLimit, limit.toString());
   // add arns headers
   res.json({
     txId: resolvedId,
     ttlSeconds: ttl,
     processId,
     resolvedAt,
+    index,
+    limit,
   });
 });
