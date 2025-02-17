@@ -13,6 +13,7 @@ primary_region = "ams"
   ARNS_ROOT_HOST="arweave.fllstck.dev"
   SANDBOX_PROTOCOL="https"
   START_WRITERS="true"
+
   CHAIN_CACHE_TYPE="redis"
   ENABLE_FS_HEADER_CACHE_CLEANUP="false"
   LOG_LEVEL="info"
