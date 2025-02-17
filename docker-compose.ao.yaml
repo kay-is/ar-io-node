@@ -1,6 +1,6 @@
 services:
   ao-cu:
-    image: ghcr.io/permaweb/ao-cu:250dbd241864ca2b81e8df7a9ff80e91788b99ac
+    image: ghcr.io/permaweb/ao-cu:latest
     restart: on-failure
     environment:
       NODE_CONFIG_ENV: ${NODE_CONFIG_ENV:-development}
@@ -14,8 +14,8 @@ services:
       GATEWAY_URL: ${GATEWAY_URL:-http://envoy:3000}
       UPLOADER_URL: ${UPLOADER_URL:-http://envoy:3000/bundler}
       ARWEAVE_URL: ${ARWEAVE_URL:-}
-      GRAPHQL_URL: ${GRAPHQL_URL:-}
-      CHECKPOINT_GRAPHQL_URL: ${CHECKPOINT_GRAPHQL_URL:-}
+      GRAPHQL_URL: ${GRAPHQL_URL:-https://arweave.net/graphql}
+      CHECKPOINT_GRAPHQL_URL: ${CHECKPOINT_GRAPHQL_URL:-https://arweave.net/graphql}
       PORT: ${CU_PORT:-6363}
       ENABLE_METRICS_ENDPOINT: ${ENABLE_METRICS_ENDPOINT:-}
       DB_MODE: ${DB_MODE:-}

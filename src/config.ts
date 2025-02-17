@@ -97,6 +97,11 @@ export const WEIGHTED_PEERS_TEMPERATURE_DELTA = +env.varOrDefault(
   '2',
 );
 
+export const GATEWAY_PEERS_WEIGHTS_CACHE_DURATION_MS = +env.varOrDefault(
+  'GATEWAY_PEERS_WEIGHTS_CACHE_DURATION_MS',
+  `${5 * 1000}`, // 5 seconds
+);
+
 export const ARWEAVE_NODE_IGNORE_URLS: string[] =
   env.varOrUndefined('ARWEAVE_NODE_IGNORE_URLS')?.split(',') ?? [];
 
@@ -104,6 +109,14 @@ export const ARWEAVE_NODE_IGNORE_URLS: string[] =
 export const CHUNK_POST_URLS = env
   .varOrDefault('CHUNK_POST_URLS', `${TRUSTED_NODE_URL}/chunk`)
   .split(',');
+
+export const CHUNK_POST_CONCURRENCY_LIMIT_STRING = env.varOrUndefined(
+  'CHUNK_POST_CONCURRENCY_LIMIT',
+);
+export const CHUNK_POST_CONCURRENCY_LIMIT =
+  CHUNK_POST_CONCURRENCY_LIMIT_STRING !== undefined
+    ? +CHUNK_POST_CONCURRENCY_LIMIT_STRING
+    : 2;
 
 const SECONDARY_CHUNK_POST_URLS_STRING = env.varOrUndefined(
   'SECONDARY_CHUNK_POST_URLS',
@@ -498,6 +511,11 @@ export const ARNS_RESOLVER_PRIORITY_ORDER = env
   .varOrDefault('ARNS_RESOLVER_PRIORITY_ORDER', 'on-demand,gateway')
   .split(',');
 
+export const ARNS_COMPOSITE_RESOLVER_TIMEOUT_MS = +env.varOrDefault(
+  'ARNS_COMPOSITE_RESOLVER_TIMEOUT_MS',
+  '3000',
+);
+
 export const ARNS_ON_DEMAND_CIRCUIT_BREAKER_TIMEOUT_MS = +env.varOrDefault(
   'ARNS_ON_DEMAND_CIRCUIT_BREAKER_TIMEOUT_MS',
   `${5 * 1000}`, // 5 seconds
@@ -545,8 +563,9 @@ export const ARNS_ANT_STATE_CACHE_HIT_REFRESH_WINDOW_SECONDS =
   );
 
 // TODO: support multiple gateway urls
-export const TRUSTED_ARNS_GATEWAY_URL = env.varOrUndefined(
+export const TRUSTED_ARNS_GATEWAY_URL = env.varOrDefault(
   'TRUSTED_ARNS_GATEWAY_URL',
+  'https://__NAME__.arweave.net',
 );
 
 //

@@ -16,4 +16,13 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-export const release = '26';
+// Fisher-Yates algorithm
+// this shuffles array in-place, use [...arr] pattern
+// to copy it beforehand if you don't want side-effects
+export const shuffleArray = <T>(array: T[]): T[] => {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+};
