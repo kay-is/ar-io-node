@@ -27,7 +27,8 @@ primary_region = "ams"
   ARNS_NAMES_CACHE_TTL_SECONDS="300"
   ENABLE_MEMPOOL_WATCHER="false"
   CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD="86400" # older than a day
-#  REDIS_CACHE_URL=*** // Using Upstash Redis via Fly.io
+#  Using Upstash Redis via Flyio
+#  REDIS_CACHE_URL=redis://default:***@fly-ario-gateway-cache.upstash.io:6379 
 #  ADMIN_API_KEY=***
 #  AR_IO_WALLET=***
 
