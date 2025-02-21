@@ -7,7 +7,7 @@ app = "ar-io-node"
 primary_region = "ams"
 
 [build]
-  image = "ghcr.io/ar-io/ar-io-core:3ea34c3c116aa80ed186628d810c6af39b43f3c8"
+  image = "ghcr.io/ar-io/ar-io-core:631f0c7f883c8b0176abf374dd2a81461cabae2b"
   
 [env]
   ARNS_ROOT_HOST="arweave.fllstck.dev"
@@ -17,7 +17,7 @@ primary_region = "ams"
   ENABLE_FS_HEADER_CACHE_CLEANUP="false"
   LOG_LEVEL="info"
   ANS104_UNBUNDLE_WORKERS="0"
-  AR_IO_NODE_RELEASE="26"
+  AR_IO_NODE_RELEASE="27"
   TRUSTED_GATEWAY_URL="https://arweave.net"
   TRUSTED_ARNS_GATEWAY_URL="https://__NAME__.arweave.net"
   ARNS_RESOLVER_PRIORITY_ORDER="on-demand,gateway"
