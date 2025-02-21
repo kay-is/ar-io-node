@@ -12,9 +12,8 @@ primary_region = "ams"
 [env]
   ARNS_ROOT_HOST="arweave.fllstck.dev"
   SANDBOX_PROTOCOL="https"
-  START_WRITERS="true"
+  START_WRITERS="false"
 
-  CHAIN_CACHE_TYPE="redis"
   ENABLE_FS_HEADER_CACHE_CLEANUP="false"
   LOG_LEVEL="info"
   ANS104_UNBUNDLE_WORKERS="0"
@@ -28,7 +27,7 @@ primary_region = "ams"
   ENABLE_MEMPOOL_WATCHER="false"
   CONTIGUOUS_DATA_CACHE_CLEANUP_THRESHOLD="86400" # older than a day
 #  Using Upstash Redis via Flyio
-#  REDIS_CACHE_URL=redis://default:***@fly-ario-gateway-cache.upstash.io:6379 
+#  REDIS_CACHE_URL=redis://default:***@fly-ario-cache.upstash.io:6379?family=6 
 #  ADMIN_API_KEY=***
 #  AR_IO_WALLET=***
 
